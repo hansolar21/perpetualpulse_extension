@@ -1,4 +1,4 @@
-# Perpetuapulse_extension
+# Perpetuapulse Trading Metrics Extension
 
 ## Perpetualpulse Trading Metrics Extension
 
@@ -9,7 +9,7 @@ A lightweight browser extension that injects real-time trading metrics—includi
 - **Live summary:** Shows your total long/short portfolio exposure, leverage ratios, and count of positions.
 - **Automatic refresh:** Updates automatically when you open new trades, close positions, or refresh the page—no manual reload required.
 - **Non-intrusive:** Integrates cleanly into the existing account overview panel, with no external dependencies.
-- **Show/Hide Values*: Toggle visibility of the metrics with a single click.
+- **Show/Hide Values**: Toggle visibility of the metrics with a single click.
 
 ### What It Does
 
