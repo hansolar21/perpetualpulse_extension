@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Perpetualpulse Trading Extension",
+  "version": "1.0",
+  "description": "Additional metrics for trading dashboard",
+  "permissions": ["storage"],
+  "host_permissions": ["https://app.lighter.xyz/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://app.lighter.xyz/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png",
+    "512": "icon-512.png"
+  }
+}
