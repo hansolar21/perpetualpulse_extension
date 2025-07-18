@@ -4,12 +4,12 @@
   "version": "1.0",
   "description": "Additional metrics for trading dashboard",
   "permissions": ["storage"],
-  "host_permissions": ["https://app.lighter.xyz/*"],
+  "host_permissions": ["https://app.lighter.xyz/trade/*"],
   "content_scripts": [
     {
-      "matches": ["https://app.lighter.xyz/*"],
+      "matches": ["https://app.lighter.xyz/trade/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "icons": {

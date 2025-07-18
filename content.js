@@ -6,6 +6,103 @@
 
 console.log("[Perpetualpulse] content.js injected");
 
+// Debugging
+console.log("[Perpetualpulse] patch loaded at", performance.now());
+window._patch_test = 1;
+
+let lastHref = location.href;
+
+function checkUrlChange() {
+    if (location.href !== lastHref) {
+        lastHref = location.href;
+        // Optionally, filter for /trade URLs here:
+        if (/\/trade(\/|$|\?)/.test(location.pathname)) {
+            // Re-run your main inject function
+            waitForDomAndData();
+        }
+    }
+    requestAnimationFrame(checkUrlChange);
+}
+requestAnimationFrame(checkUrlChange);
+
+// PATCH FETCH
+const origFetch = window.fetch;
+window.fetch = function() {
+    console.log("[Perpetualpulse] fetch called with:", arguments);
+    return origFetch.apply(this, arguments);
+};
+console.log("[Perpetualpulse] fetch patched", window.fetch === origFetch ? "(no)" : "(yes)");
+
+// PATCH XHR
+const origOpen = XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open = function() {
+    console.log("[Perpetualpulse] XHR open called with:", arguments);
+    return origOpen.apply(this, arguments);
+};
+console.log("[Perpetualpulse] XHR patched", XMLHttpRequest.prototype.open === origOpen ? "(no)" : "(yes)");
+
+
+(function() {
+    let currentToken = null;
+    // Patch fetch
+    const origFetch = window.fetch;
+    window.fetch = function(input, init = {}) {
+        if (init && init.headers) {
+            if (init.headers['authorization']) {
+                currentToken = init.headers['authorization'];
+                console.log("[Perpetualpulse] fetch: captured authorization token:", currentToken);
+            }
+            if (typeof init.headers.get === 'function') {
+                const val = init.headers.get('authorization');
+                if (val) {
+                    currentToken = val;
+                    console.log("[Perpetualpulse] fetch: captured authorization token:", currentToken);
+                }
+            }
+        }
+        return origFetch.apply(this, arguments);
+    };
+
+    // Patch XHR
+    const origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+        this._url = arguments[1];
+        return origOpen.apply(this, arguments);
+    };
+    const origSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function(header, value) {
+        if (header.toLowerCase() === "authorization") {
+            currentToken = value;
+            console.log("[Perpetualpulse] XHR: captured authorization token:", currentToken);
+        }
+        return origSetRequestHeader.apply(this, arguments);
+    };
+
+    // Export getter for polling
+    window.getCurrentLighterAuthToken = () => currentToken;
+})();
+
+// Utility: poll for the token, print when found
+function waitForAuthToken(timeout = 10000, interval = 200) {
+    return new Promise((resolve, reject) => {
+        const start = Date.now();
+        (function poll() {
+            const token = window.getCurrentLighterAuthToken();
+            if (token) {
+                console.log("[Perpetualpulse] Final authorization token:", token);
+                return resolve(token);
+            }
+            if (Date.now() - start > timeout) return reject(new Error("Timeout: No authorization token found"));
+            setTimeout(poll, interval);
+        })();
+    });
+}
+
+// Example usage: will print the token when found or error if not after 10 seconds
+waitForAuthToken().then(token => {
+    // token is now available for further API requests if you want
+}).catch(console.error);
+
 const maxTries = 40;
 let attempt = 0;
 let observer = null;
@@ -74,11 +171,24 @@ function parseUSD(str) {
 function getPortfolioValue() {
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
     if (!container) return 0;
-    const labels = container.querySelectorAll('span.text-xs.text-gray-3');
-    for (let label of labels) {
-        if (label.innerText.trim().toLowerCase() === "portfolio value:") {
-            const valueEl = label.closest('div').nextElementSibling;
-            return parseUSD(valueEl?.innerText || '');
+
+    const rows = container.querySelectorAll('div.flex.w-full.items-center.justify-between');
+    for (let row of rows) {
+        const labelSpan = row.querySelector('span.text-xs.text-gray-3, span.text-xs.text-gray-3.underline');
+        if (!labelSpan) continue;
+
+        const ltxt = labelSpan.innerText.trim().toLowerCase();
+        if (
+            ltxt === "portfolio value:" ||
+            ltxt === "perps equity:" ||           // new label
+            ltxt.includes("portfolio") ||
+            ltxt.includes("equity")
+        ) {
+            // In this row, value is in the SECOND child: the .text-gray-0 span
+            const valueSpan = row.querySelector('span.text-xs.text-gray-0');
+            if (valueSpan) {
+                return parseUSD(valueSpan.innerText);
+            }
         }
     }
     return 0;
@@ -140,11 +250,16 @@ function injectMetrics() {
     const longRatio = total > 0 ? (longSum / total).toFixed(2) : "0.00";
     const lsRatio = shortSum > 0 ? (longSum / shortSum).toFixed(2) : "∞";
 
+    // *** Net leverage calculation ***
+    const netExposure = Math.abs(longSum - shortSum);
+    const netLeverage = portVal ? netExposure / portVal : 0;
+
     const newRows = [
         formatRow("Long vs Short:", `$${longSum.toLocaleString()} / $${shortSum.toLocaleString()}`, "ls-line-1", true),
         formatRow("L/S Ratio:", `${lsRatio} (Longs = ${longRatio})`, "ls-line-2"),
         formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs at ${avg(longLevs).toFixed(1)}x)`, "ls-line-3"),
-        formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`, "ls-line-4")
+        formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`, "ls-line-4"),
+        formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x (|Long - Short| = $${netExposure.toLocaleString()})`, "ls-line-5")
     ];
 
     newRows.forEach(row => container.appendChild(row));
@@ -163,7 +278,7 @@ function observeTable(table) {
 }
 
 function waitForDomAndData() {
-    console.log(`[Perpetualpulse] Attempt ${attempt + 1} to locate DOM and data...`);
+    // console.log(`[Perpetualpulse] Attempt ${attempt + 1} to locate DOM and data...`);
     const table = document.querySelector("table");
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
 
