@@ -248,10 +248,19 @@ function injectMetrics() {
 
     const total = longSum + shortSum;
     const longRatio = total > 0 ? (longSum / total).toFixed(2) : "0.00";
-    const lsRatio = shortSum > 0 ? (longSum / shortSum).toFixed(2) : "∞";
+    let lsRatio;
+    if (longSum === 0 && shortSum === 0) {
+        lsRatio = "0.00";
+    } else if (shortSum === 0) {
+        lsRatio = "∞";
+    } else if (longSum >= shortSum) {
+        lsRatio = (longSum / shortSum).toFixed(2);
+    } else {
+        lsRatio = (-shortSum / longSum).toFixed(2);
+    }
 
     // *** Net leverage calculation ***
-    const netExposure = Math.abs(longSum - shortSum);
+    const netExposure = longSum - shortSum;
     const netLeverage = portVal ? netExposure / portVal : 0;
 
     const newRows = [
@@ -259,7 +268,7 @@ function injectMetrics() {
         formatRow("L/S Ratio:", `${lsRatio} (Longs = ${longRatio})`, "ls-line-2"),
         formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs at ${avg(longLevs).toFixed(1)}x)`, "ls-line-3"),
         formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`, "ls-line-4"),
-        formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x (|Long - Short| = $${netExposure.toLocaleString()})`, "ls-line-5")
+        formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x ($${netExposure.toLocaleString()})`, "ls-line-5")
     ];
 
     newRows.forEach(row => container.appendChild(row));
@@ -295,3 +304,5 @@ function waitForDomAndData() {
 }
 
 waitForDomAndData();
+
+if (window.injectVolatilityColumn) window.injectVolatilityColumn();
