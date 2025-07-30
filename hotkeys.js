@@ -1,22 +1,11 @@
 // hotkey-tabs.js
-// Adds Option/Alt+M, L, B, S hotkeys for tab switching and for toggling buy/sell side selection, with dynamic hotkey labels and fast order workflow
+// Adds Option/Alt+M, L, B, S hotkeys for tab switching and toggling buy/sell side selection, with dynamic hotkey labels, and double Option/Alt tap to pin/hide badges
 
 (function waitForTabsAndInit() {
-    // Detect platform (Mac vs Windows/Linux)
     const isMac = /Mac/i.test(navigator.platform);
 
-    // Wait for all required UI elements to exist
-    const marketBtn = document.querySelector('[data-testid="select-order-type-market"]');
-    const limitBtn = document.querySelector('[data-testid="select-order-type-limit"]');
-    // For side tabs, look for buttons in the h-8 row (the actual toggle, not the big Place Order)
-    const sideRow = document.querySelector('div.relative.flex.h-8');
-    const sideButtons = sideRow ? Array.from(sideRow.querySelectorAll('button')) : [];
-    const buySideBtn = sideButtons.find(btn => btn.textContent.trim().toLowerCase().includes('buy') || btn.textContent.trim().toLowerCase().includes('long'));
-    const sellSideBtn = sideButtons.find(btn => btn.textContent.trim().toLowerCase().includes('sell') || btn.textContent.trim().toLowerCase().includes('short'));
-
-    // Also check for the amount input and place order button
+    // Helpers for Amount input and Place Order button
     function getAmountInput() {
-        // Use the most specific selector possible, fallback to common pattern
         return document.querySelector('input[data-testid="place-order-size-input"], input[placeholder="0.0"], input[placeholder="0"]');
     }
     function focusAmountInput() {
@@ -27,11 +16,8 @@
         }
     }
     function getPlaceOrderButton() {
-        // The main execution button should have this testid
         return document.querySelector('button[data-testid="place-order-button"]');
     }
-
-    // Attach enter-to-trade shortcut just once per amount input
     function attachEnterForOrder() {
         const inp = getAmountInput();
         if (inp && !inp._perppulse_enter_handler) {
@@ -46,6 +32,14 @@
             inp._perppulse_enter_handler = true;
         }
     }
+
+    // Wait for all required UI elements to exist
+    const marketBtn = document.querySelector('[data-testid="select-order-type-market"]');
+    const limitBtn = document.querySelector('[data-testid="select-order-type-limit"]');
+    const sideRow = document.querySelector('div.relative.flex.h-8');
+    const sideButtons = sideRow ? Array.from(sideRow.querySelectorAll('button')) : [];
+    const buySideBtn = sideButtons.find(btn => btn.textContent.trim().toLowerCase().includes('buy') || btn.textContent.trim().toLowerCase().includes('long'));
+    const sellSideBtn = sideButtons.find(btn => btn.textContent.trim().toLowerCase().includes('sell') || btn.textContent.trim().toLowerCase().includes('short'));
 
     if (!marketBtn || !limitBtn || !buySideBtn || !sellSideBtn) {
         setTimeout(waitForTabsAndInit, 300);
@@ -78,7 +72,6 @@
             if (btn) setTimeout(() => { btn.click(); setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 100); }, 0);
         }
     }
-    // Switch buy/sell SIDE (not order submit!)
     function switchToSide(side) {
         const sideRow = document.querySelector('div.relative.flex.h-8');
         if (!sideRow) return;
@@ -160,10 +153,23 @@
         }
     }
 
-    // Keyboard listeners
+    // Double Option/Alt tap to pin/hide hotkey badges
+    let lastAltTap = 0;
+    let hotkeysPinned = false;
+
     document.addEventListener('keydown', function(e) {
+        // Double tap detection for Alt/Option (when only Alt/Option pressed)
+        if ((e.key === "Alt" || (isMac && e.key === "Meta")) && !e.repeat) {
+            const now = Date.now();
+            if (now - lastAltTap < 400) {
+                hotkeysPinned = !hotkeysPinned;
+                showHotkeyLabels(hotkeysPinned);
+            }
+            lastAltTap = now;
+        }
+
         if (e.altKey && !e.repeat) {
-            showHotkeyLabels(true);
+            if (!hotkeysPinned) showHotkeyLabels(true);
             switch (e.code) {
                 case 'KeyM':
                     switchToOrderTab('market');
@@ -185,15 +191,15 @@
         }
     });
     document.addEventListener('keyup', function(e) {
-        if (!e.altKey) {
+        if (!e.altKey && !hotkeysPinned) {
             showHotkeyLabels(false);
         }
     });
     window.addEventListener('blur', () => {
-        showHotkeyLabels(false);
+        if (!hotkeysPinned) showHotkeyLabels(false);
     });
 
-    // Attach once at startup
+    // Attach Enter-to-trade shortcut once at startup
     setTimeout(attachEnterForOrder, 500);
 
 })();

@@ -33,6 +33,8 @@ Speed up trading with built-in keyboard shortcuts:
 | Switch to Buy side           | ⌥ + B        | Alt + B               |
 | Switch to Sell side          | ⌥ + S        | Alt + S               |
 | Execute trade (in Amount input) | Enter   | Enter                 |
+| **Show/hide hotkey badges**  | **Double-tap Option** | **Double-tap Alt**  |
+
 
 - **Badges**: Hotkey hints appear next to each tab or side button for your operating system (⌥ for Mac, Alt for Windows/Linux) while you hold Option/Alt.
 - **Focus**: After any tab or side hotkey, your cursor jumps to the Amount input—just type your size.
