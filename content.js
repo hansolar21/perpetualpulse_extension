@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Perpetualpulse Trading Metrics
-// @version      1.3
+// @version      1.4
 // @description  Injects long/short summary and leverage stats into lighter.xyz, now with persistent masking
 // ==/UserScript==
 
@@ -15,9 +15,7 @@ let lastHref = location.href;
 function checkUrlChange() {
     if (location.href !== lastHref) {
         lastHref = location.href;
-        // Optionally, filter for /trade URLs here:
         if (/\/trade(\/|$|\?)/.test(location.pathname)) {
-            // Re-run your main inject function
             waitForDomAndData();
         }
     }
@@ -44,7 +42,6 @@ console.log("[Perpetualpulse] XHR patched", XMLHttpRequest.prototype.open === or
 
 (function() {
     let currentToken = null;
-    // Patch fetch
     const origFetch = window.fetch;
     window.fetch = function(input, init = {}) {
         if (init && init.headers) {
@@ -63,7 +60,6 @@ console.log("[Perpetualpulse] XHR patched", XMLHttpRequest.prototype.open === or
         return origFetch.apply(this, arguments);
     };
 
-    // Patch XHR
     const origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
         this._url = arguments[1];
@@ -78,7 +74,6 @@ console.log("[Perpetualpulse] XHR patched", XMLHttpRequest.prototype.open === or
         return origSetRequestHeader.apply(this, arguments);
     };
 
-    // Export getter for polling
     window.getCurrentLighterAuthToken = () => currentToken;
 })();
 
@@ -98,19 +93,15 @@ function waitForAuthToken(timeout = 10000, interval = 200) {
     });
 }
 
-// Example usage: will print the token when found or error if not after 10 seconds
-waitForAuthToken().then(token => {
-    // token is now available for further API requests if you want
-}).catch(console.error);
+waitForAuthToken().catch(() => { /* ignore if not found */ });
 
 const maxTries = 40;
 let attempt = 0;
 let observer = null;
 
-// Tracks which value rows are masked by id (true = masked)
+// Persistent mask state (id -> true = masked)
 const maskedRows = {};
 
-// Util: Obscure or reveal value text (asterisk toggle)
 function applyMask(span, realText, isMasked) {
     if (isMasked) {
         span.innerText = "******";
@@ -121,7 +112,6 @@ function applyMask(span, realText, isMasked) {
     }
 }
 
-// For each row, use persistent mask state keyed by id
 function formatRow(label, value, id = "", isFirst = false) {
     const row = document.createElement("div");
     row.className = "flex w-full items-center justify-between";
@@ -146,11 +136,9 @@ function formatRow(label, value, id = "", isFirst = false) {
     valueSpan.className = "text-xs text-gray-0";
     valueSpan.setAttribute("data-real", value);
 
-    // Use persistent masked state
     const isMasked = !!maskedRows[id];
     applyMask(valueSpan, value, isMasked);
 
-    // Toggle mask and update state on click
     valueSpan.style.cursor = "pointer";
     valueSpan.addEventListener("click", function (e) {
         maskedRows[id] = !(valueSpan.getAttribute("data-masked") === "1");
@@ -161,6 +149,84 @@ function formatRow(label, value, id = "", isFirst = false) {
     labelDiv.appendChild(labelSpan);
     row.appendChild(labelDiv);
     row.appendChild(valueSpan);
+    return row;
+}
+
+/** Action row: whole line clickable to copy equation; shows 📋 icon, hover color, and ⓘ tooltip */
+function formatCopyEquationRow(onClick, id = "") {
+    const row = document.createElement("div");
+    row.className = "flex w-full items-center justify-between";
+    row.setAttribute("data-injected", "ls-info");
+    if (id) row.setAttribute("data-injected-id", id);
+
+    // LEFT side: [📋 Copy TradingView equation] [ⓘ]
+    const leftWrap = document.createElement("div");
+    leftWrap.className = "flex items-center gap-2";
+
+    const labelSpan = document.createElement("span");
+    labelSpan.className = "text-xs text-gray-2 underline";
+    labelSpan.innerText = "Copy TradingView equation";
+    labelSpan.style.cursor = "pointer";
+
+    // Copy icon
+    const icon = document.createElement("span");
+    icon.innerText = "📋";
+    icon.setAttribute("aria-hidden", "true");
+    icon.style.fontSize = "12px";
+
+    // ⓘ tooltip
+    const info = document.createElement("span");
+    info.innerText = "ⓘ";
+    info.setAttribute("title",
+        "Paste into TradingView to see a consolidated chart of your current positions. TradingView only supports 10 combined tickers. This equation implies a 1x leverage relative to your equity."
+    );
+    info.style.cursor = "help";
+    info.style.fontSize = "12px";
+    info.style.opacity = "0.8";
+
+    leftWrap.appendChild(icon);
+    leftWrap.appendChild(labelSpan);
+    leftWrap.appendChild(info);
+
+    // Entire row acts as a button
+    row.style.cursor = "pointer";
+    row.style.userSelect = "none";
+
+    // Hover effect (make more visible)
+    const baseColor = "rgba(255,255,255,0.6)"; // text-gray-2-ish
+    const hoverColor = "rgba(255,255,255,0.9)";
+    labelSpan.style.color = baseColor;
+    row.addEventListener("mouseenter", () => {
+        labelSpan.style.color = hoverColor;
+        labelSpan.style.textDecoration = "underline";
+    });
+    row.addEventListener("mouseleave", () => {
+        labelSpan.style.color = baseColor;
+        labelSpan.style.textDecoration = "underline";
+    });
+
+    // Click handler (on entire row + leftWrap + labelSpan + icon)
+    const handler = async (e) => {
+        e.stopPropagation();
+        try {
+            await onClick();
+            const prev = labelSpan.innerText;
+            labelSpan.innerText = "Copied!";
+            setTimeout(() => (labelSpan.innerText = prev), 1200);
+        } catch (err) {
+            console.error("[Perpetualpulse] Copy TV equation failed:", err);
+            const prev = labelSpan.innerText;
+            labelSpan.innerText = "Error";
+            setTimeout(() => (labelSpan.innerText = prev), 1500);
+        }
+    };
+    row.addEventListener("click", handler);
+    leftWrap.addEventListener("click", handler);
+    labelSpan.addEventListener("click", handler);
+    icon.addEventListener("click", handler);
+
+    // Assemble; no right-side text (removed per request)
+    row.appendChild(leftWrap);
     return row;
 }
 
@@ -180,11 +246,10 @@ function getPortfolioValue() {
         const ltxt = labelSpan.innerText.trim().toLowerCase();
         if (
             ltxt === "portfolio value:" ||
-            ltxt === "perps equity:" ||           // new label
+            ltxt === "perps equity:" ||
             ltxt.includes("portfolio") ||
             ltxt.includes("equity")
         ) {
-            // In this row, value is in the SECOND child: the .text-gray-0 span
             const valueSpan = row.querySelector('span.text-xs.text-gray-0');
             if (valueSpan) {
                 return parseUSD(valueSpan.innerText);
@@ -205,8 +270,67 @@ function tableHasData(table) {
     return false;
 }
 
+/** Normalize market symbol to TradingView symbol (force USDT, strip leading lowercase 'k') */
+function normalizeToUSDT(rawSymbol) {
+    if (!rawSymbol) return "";
+    let sym = String(rawSymbol).split("\n")[0].trim();
+    sym = sym.replace(/[:/.\-\s]/g, "");
+    sym = sym.replace(/USDT$/i, "");
+    sym = sym.replace(/^k(?=[A-Z0-9])/, ""); // kBONK -> BONK
+    return `${sym.toUpperCase()}USDT`;
+}
+
+/** Build TradingView equation from current table (top 10 by abs notional), multiplicative with exponents:
+ *   SYMBOLUSDT^weight * SYMBOLUSDT^-weight * ...
+ *   Long => positive exponent, Short => negative exponent
+ */
+async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
+    if (!table) throw new Error("No table");
+    const rows = table.querySelectorAll("tbody tr");
+
+    const positions = [];
+    rows.forEach(row => {
+        const tds = row.querySelectorAll("td");
+        if (tds.length < 3) return;
+
+        const marketCellText = tds[0].innerText || "";
+        const lower = marketCellText.toLowerCase();
+        const isLong = lower.includes("\nlong");
+        const isShort = lower.includes("\nshort");
+        if (!isLong && !isShort) return;
+
+        const notional = Math.abs(parseUSD(tds[2].innerText));
+        if (!(notional > 0)) return;
+
+        positions.push({
+            symbol: normalizeToUSDT(marketCellText),
+            side: isShort ? "Short" : "Long",
+            notional
+        });
+    });
+
+    if (positions.length === 0) {
+        await navigator.clipboard.writeText("");
+        return "";
+    }
+
+    const top = positions.sort((a, b) => b.notional - a.notional).slice(0, 10);
+    const sumAbs = top.reduce((s, p) => s + Math.abs(p.notional), 0) || 1;
+
+    const terms = top.map(p => {
+        const w = p.notional / sumAbs; // 0..1
+        const exp = (p.side === "Short" ? -w : w).toFixed(weightDecimals);
+        return `${p.symbol}^${exp}`;
+    });
+
+    const equation = terms.join("*");
+
+    await navigator.clipboard.writeText(equation);
+    console.log("[Perpetualpulse] Copied TradingView equation:", equation);
+    return equation;
+}
+
 function injectMetrics() {
-    // Remove prior injection to avoid duplicates
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
     if (!container) return;
     container.querySelectorAll('[data-injected="ls-info"]').forEach(el => el.remove());
@@ -259,7 +383,6 @@ function injectMetrics() {
         lsRatio = (-shortSum / longSum).toFixed(2);
     }
 
-    // *** Net leverage calculation ***
     const netExposure = longSum - shortSum;
     const netLeverage = portVal ? netExposure / portVal : 0;
 
@@ -268,7 +391,15 @@ function injectMetrics() {
         formatRow("L/S Ratio:", `${lsRatio} (Longs = ${longRatio})`, "ls-line-2"),
         formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs at ${avg(longLevs).toFixed(1)}x)`, "ls-line-3"),
         formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`, "ls-line-4"),
-        formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x ($${netExposure.toLocaleString()})`, "ls-line-5")
+        formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x ($${netExposure.toLocaleString()})`, "ls-line-5"),
+        // New clickable copy row under Net Leverage
+        formatCopyEquationRow(
+            () => {
+                const tableEl = document.querySelector("table");
+                return copyTradingViewEquationFromTable(tableEl, 4);
+            },
+            "ls-line-tv"
+        )
     ];
 
     newRows.forEach(row => container.appendChild(row));
@@ -287,7 +418,6 @@ function observeTable(table) {
 }
 
 function waitForDomAndData() {
-    // console.log(`[Perpetualpulse] Attempt ${attempt + 1} to locate DOM and data...`);
     const table = document.querySelector("table");
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
 
