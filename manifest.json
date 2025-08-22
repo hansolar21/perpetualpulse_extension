@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Perpetualpulse Trading Extension",
   "version": "1.0",
-  "description": "Additional metrics for trading dashboard",
+  "description": "Additional metrics for trading dashboard on Lighter.xyz",
   "permissions": ["storage"],
   "host_permissions": ["https://app.lighter.xyz/trade/*"],
   "content_scripts": [
