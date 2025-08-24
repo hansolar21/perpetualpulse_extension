@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Perpetualpulse Trading Metrics
-// @version      1.4
+// @version      1.5
 // @description  Injects long/short summary and leverage stats into lighter.xyz, now with persistent masking
 // ==/UserScript==
 
@@ -22,78 +22,6 @@ function checkUrlChange() {
     requestAnimationFrame(checkUrlChange);
 }
 requestAnimationFrame(checkUrlChange);
-
-// PATCH FETCH
-const origFetch = window.fetch;
-window.fetch = function() {
-    console.log("[Perpetualpulse] fetch called with:", arguments);
-    return origFetch.apply(this, arguments);
-};
-console.log("[Perpetualpulse] fetch patched", window.fetch === origFetch ? "(no)" : "(yes)");
-
-// PATCH XHR
-const origOpen = XMLHttpRequest.prototype.open;
-XMLHttpRequest.prototype.open = function() {
-    console.log("[Perpetualpulse] XHR open called with:", arguments);
-    return origOpen.apply(this, arguments);
-};
-console.log("[Perpetualpulse] XHR patched", XMLHttpRequest.prototype.open === origOpen ? "(no)" : "(yes)");
-
-
-(function() {
-    let currentToken = null;
-    const origFetch = window.fetch;
-    window.fetch = function(input, init = {}) {
-        if (init && init.headers) {
-            if (init.headers['authorization']) {
-                currentToken = init.headers['authorization'];
-                console.log("[Perpetualpulse] fetch: captured authorization token:", currentToken);
-            }
-            if (typeof init.headers.get === 'function') {
-                const val = init.headers.get('authorization');
-                if (val) {
-                    currentToken = val;
-                    console.log("[Perpetualpulse] fetch: captured authorization token:", currentToken);
-                }
-            }
-        }
-        return origFetch.apply(this, arguments);
-    };
-
-    const origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function() {
-        this._url = arguments[1];
-        return origOpen.apply(this, arguments);
-    };
-    const origSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
-    XMLHttpRequest.prototype.setRequestHeader = function(header, value) {
-        if (header.toLowerCase() === "authorization") {
-            currentToken = value;
-            console.log("[Perpetualpulse] XHR: captured authorization token:", currentToken);
-        }
-        return origSetRequestHeader.apply(this, arguments);
-    };
-
-    window.getCurrentLighterAuthToken = () => currentToken;
-})();
-
-// Utility: poll for the token, print when found
-function waitForAuthToken(timeout = 10000, interval = 200) {
-    return new Promise((resolve, reject) => {
-        const start = Date.now();
-        (function poll() {
-            const token = window.getCurrentLighterAuthToken();
-            if (token) {
-                console.log("[Perpetualpulse] Final authorization token:", token);
-                return resolve(token);
-            }
-            if (Date.now() - start > timeout) return reject(new Error("Timeout: No authorization token found"));
-            setTimeout(poll, interval);
-        })();
-    });
-}
-
-waitForAuthToken().catch(() => { /* ignore if not found */ });
 
 const maxTries = 40;
 let attempt = 0;
@@ -192,9 +120,9 @@ function formatCopyEquationRow(onClick, id = "") {
     row.style.cursor = "pointer";
     row.style.userSelect = "none";
 
-    // Hover effect (make more visible)
-    const baseColor = "rgba(255,255,255,0.6)"; // text-gray-2-ish
-    const hoverColor = "rgba(255,255,255,0.9)";
+    // Hover effect
+    const baseColor = "rgba(255,255,255,0.6)";
+    const hoverColor = "rgb(212, 68, 77)";
     labelSpan.style.color = baseColor;
     row.addEventListener("mouseenter", () => {
         labelSpan.style.color = hoverColor;
@@ -205,14 +133,14 @@ function formatCopyEquationRow(onClick, id = "") {
         labelSpan.style.textDecoration = "underline";
     });
 
-    // Click handler (on entire row + leftWrap + labelSpan + icon)
+    // Click handler
     const handler = async (e) => {
         e.stopPropagation();
         try {
-            await onClick();
+            const eq = await onClick();
             const prev = labelSpan.innerText;
-            labelSpan.innerText = "Copied!";
-            setTimeout(() => (labelSpan.innerText = prev), 1200);
+            labelSpan.innerText = eq;
+            setTimeout(() => (labelSpan.innerText = prev), 2500);
         } catch (err) {
             console.error("[Perpetualpulse] Copy TV equation failed:", err);
             const prev = labelSpan.innerText;
@@ -225,7 +153,6 @@ function formatCopyEquationRow(onClick, id = "") {
     labelSpan.addEventListener("click", handler);
     icon.addEventListener("click", handler);
 
-    // Assemble; no right-side text (removed per request)
     row.appendChild(leftWrap);
     return row;
 }
@@ -276,14 +203,10 @@ function normalizeToUSDT(rawSymbol) {
     let sym = String(rawSymbol).split("\n")[0].trim();
     sym = sym.replace(/[:/.\-\s]/g, "");
     sym = sym.replace(/USDT$/i, "");
-    sym = sym.replace(/^k(?=[A-Z0-9])/, ""); // kBONK -> BONK
+    sym = sym.replace(/^k(?=[A-Z0-9])/, "");
     return `${sym.toUpperCase()}USDT`;
 }
 
-/** Build TradingView equation from current table (top 10 by abs notional), multiplicative with exponents:
- *   SYMBOLUSDT^weight * SYMBOLUSDT^-weight * ...
- *   Long => positive exponent, Short => negative exponent
- */
 async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
     if (!table) throw new Error("No table");
     const rows = table.querySelectorAll("tbody tr");
@@ -318,13 +241,12 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
     const sumAbs = top.reduce((s, p) => s + Math.abs(p.notional), 0) || 1;
 
     const terms = top.map(p => {
-        const w = p.notional / sumAbs; // 0..1
+        const w = p.notional / sumAbs;
         const exp = (p.side === "Short" ? -w : w).toFixed(weightDecimals);
         return `${p.symbol}^${exp}`;
     });
 
     const equation = terms.join("*");
-
     await navigator.clipboard.writeText(equation);
     console.log("[Perpetualpulse] Copied TradingView equation:", equation);
     return equation;
@@ -392,7 +314,6 @@ function injectMetrics() {
         formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs at ${avg(longLevs).toFixed(1)}x)`, "ls-line-3"),
         formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`, "ls-line-4"),
         formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x ($${netExposure.toLocaleString()})`, "ls-line-5"),
-        // New clickable copy row under Net Leverage
         formatCopyEquationRow(
             () => {
                 const tableEl = document.querySelector("table");
