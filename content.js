@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perpetualpulse Trading Metrics
-// @version      1.5
-// @description  Injects long/short summary and leverage stats into lighter.xyz, now with persistent masking
+// @version      1.6
+// @description  Injects long/short summary and leverage stats into lighter.xyz, now with robust equity detection & persistent masking
 // ==/UserScript==
 
 console.log("[Perpetualpulse] content.js injected");
@@ -30,6 +30,7 @@ let observer = null;
 // Persistent mask state (id -> true = masked)
 const maskedRows = {};
 
+// ---------- Utils ----------
 function applyMask(span, realText, isMasked) {
     if (isMasked) {
         span.innerText = "******";
@@ -105,7 +106,8 @@ function formatCopyEquationRow(onClick, id = "") {
     // ⓘ tooltip
     const info = document.createElement("span");
     info.innerText = "ⓘ";
-    info.setAttribute("title",
+    info.setAttribute(
+        "title",
         "Paste into TradingView to see a consolidated chart of your current positions. TradingView only supports 10 combined tickers. This equation implies a 1x leverage relative to your equity."
     );
     info.style.cursor = "help";
@@ -158,34 +160,52 @@ function formatCopyEquationRow(onClick, id = "") {
 }
 
 function parseUSD(str) {
-    return parseFloat(str.replace(/[$,%x]/gi, '')) || 0;
+    // Strip $, commas, %, x, spaces, NBSP
+    return parseFloat((str || "").replace(/[\s\u00A0,$%x]/gi, "")) || 0;
 }
+
+// ---------- Robust Equity Detection ----------
+let _lastGoodEquity = 0;
 
 function getPortfolioValue() {
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
     if (!container) return 0;
 
-    const rows = container.querySelectorAll('div.flex.w-full.items-center.justify-between');
-    for (let row of rows) {
-        const labelSpan = row.querySelector('span.text-xs.text-gray-3, span.text-xs.text-gray-3.underline');
-        if (!labelSpan) continue;
+    // Support both old and new class combos; anchor to direct children
+    const rows = container.querySelectorAll(
+        ':scope > div.flex.w-full.justify-between, :scope > div.flex.w-full.items-center.justify-between'
+    );
 
-        const ltxt = labelSpan.innerText.trim().toLowerCase();
+    for (const row of rows) {
+        // Label can be a <p> or <span>
+        const labelEl = row.querySelector('p, span');
+        const label = (labelEl?.textContent || "").trim().toLowerCase();
+
+        // Be generous with matching to survive copy tweaks
         if (
-            ltxt === "portfolio value:" ||
-            ltxt === "perps equity:" ||
-            ltxt.includes("portfolio") ||
-            ltxt.includes("equity")
+            /trading\s*equity/.test(label) ||
+            /portfolio\s*value/.test(label) ||
+            /perps?\s*equity/.test(label) ||
+            /\bequity\b/.test(label)
         ) {
-            const valueSpan = row.querySelector('span.text-xs.text-gray-0');
+            // Value usually sits in '.tabular-nums span', but fall back broadly
+            const valueSpan = row.querySelector('.tabular-nums span, span.text-xs.text-gray-0, span');
             if (valueSpan) {
-                return parseUSD(valueSpan.innerText);
+                const val = parseUSD(valueSpan.textContent);
+                if (isFinite(val) && val > 0) return val;
             }
         }
     }
     return 0;
 }
 
+function safePortfolioValue() {
+    const v = getPortfolioValue();
+    if (v > 0) _lastGoodEquity = v;
+    return v > 0 ? v : _lastGoodEquity;
+}
+
+// ---------- Table helpers ----------
 function tableHasData(table) {
     const rows = table.querySelectorAll("tbody tr");
     for (let row of rows) {
@@ -212,7 +232,7 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
     const rows = table.querySelectorAll("tbody tr");
 
     const positions = [];
-    rows.forEach(row => {
+    rows.forEach((row) => {
         const tds = row.querySelectorAll("td");
         if (tds.length < 3) return;
 
@@ -228,7 +248,7 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
         positions.push({
             symbol: normalizeToUSDT(marketCellText),
             side: isShort ? "Short" : "Long",
-            notional
+            notional,
         });
     });
 
@@ -240,7 +260,7 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
     const top = positions.sort((a, b) => b.notional - a.notional).slice(0, 10);
     const sumAbs = top.reduce((s, p) => s + Math.abs(p.notional), 0) || 1;
 
-    const terms = top.map(p => {
+    const terms = top.map((p) => {
         const w = p.notional / sumAbs;
         const exp = (p.side === "Short" ? -w : w).toFixed(weightDecimals);
         return `${p.symbol}^${exp}`;
@@ -252,24 +272,28 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
     return equation;
 }
 
+// ---------- Core injection ----------
 function injectMetrics() {
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
     if (!container) return;
-    container.querySelectorAll('[data-injected="ls-info"]').forEach(el => el.remove());
+    container.querySelectorAll('[data-injected="ls-info"]').forEach((el) => el.remove());
 
     const table = document.querySelector("table");
     if (!table) return;
 
-    let longSum = 0, shortSum = 0;
-    let longLevs = [], shortLevs = [];
-    let longCount = 0, shortCount = 0;
+    let longSum = 0,
+        shortSum = 0;
+    let longLevs = [],
+        shortLevs = [];
+    let longCount = 0,
+        shortCount = 0;
 
     const rows = table.querySelectorAll("tbody tr");
-    rows.forEach(row => {
+    rows.forEach((row) => {
         const tds = row.querySelectorAll("td");
         if (tds.length < 3) return;
 
-        const marketText = tds[0].innerText.trim().toLowerCase();
+        const marketText = (tds[0].innerText || "").trim().toLowerCase();
         const value = parseUSD(tds[2].innerText);
         const isLong = marketText.includes("\nlong");
         const isShort = marketText.includes("\nshort");
@@ -287,8 +311,10 @@ function injectMetrics() {
         }
     });
 
-    const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-    const portVal = getPortfolioValue();
+    const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+    const portVal = safePortfolioValue();
+
+    // Avoid divide-by-zero; show 0 only if we truly have 0 exposure
     const longPVx = portVal ? longSum / portVal : 0;
     const shortPVx = portVal ? shortSum / portVal : 0;
 
@@ -308,22 +334,41 @@ function injectMetrics() {
     const netExposure = longSum - shortSum;
     const netLeverage = portVal ? netExposure / portVal : 0;
 
+    const fmtDollar = (n) => `$${Math.round(n).toLocaleString()}`;
+
     const newRows = [
-        formatRow("Long vs Short:", `$${longSum.toLocaleString()} / $${shortSum.toLocaleString()}`, "ls-line-1", true),
+        formatRow(
+            "Long vs Short:",
+            `${fmtDollar(longSum)} / ${fmtDollar(shortSum)}`,
+            "ls-line-1",
+            true
+        ),
         formatRow("L/S Ratio:", `${lsRatio} (Longs = ${longRatio})`, "ls-line-2"),
-        formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs at ${avg(longLevs).toFixed(1)}x)`, "ls-line-3"),
-        formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`, "ls-line-4"),
-        formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x ($${netExposure.toLocaleString()})`, "ls-line-5"),
+        formatRow(
+            "Long vs Portfolio:",
+            `${longPVx.toFixed(2)}x (${longCount} pairs at ${avg(longLevs).toFixed(1)}x)`,
+            "ls-line-3"
+        ),
+        formatRow(
+            "Short vs Portfolio:",
+            `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`,
+            "ls-line-4"
+        ),
+        formatRow(
+            "Net Leverage:",
+            `${netLeverage.toFixed(2)}x (${fmtDollar(netExposure)})`,
+            "ls-line-5"
+        ),
         formatCopyEquationRow(
             () => {
                 const tableEl = document.querySelector("table");
                 return copyTradingViewEquationFromTable(tableEl, 4);
             },
             "ls-line-tv"
-        )
+        ),
     ];
 
-    newRows.forEach(row => container.appendChild(row));
+    newRows.forEach((row) => container.appendChild(row));
 }
 
 function observeTable(table) {
@@ -335,7 +380,7 @@ function observeTable(table) {
         injectMetrics();
     });
     observer.observe(table, { childList: true, subtree: true, characterData: true });
-    console.log("[Perpetualpulse] MutationObserver attached.");
+    // console.log("[Perpetualpulse] MutationObserver attached.");
 }
 
 function waitForDomAndData() {
@@ -343,7 +388,7 @@ function waitForDomAndData() {
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
 
     if (table && container && tableHasData(table)) {
-        console.log("[Perpetualpulse] DOM & data found. Injecting metrics.");
+        // console.log("[Perpetualpulse] DOM & data found. Injecting metrics.");
         injectMetrics();
         observeTable(table);
     } else if (attempt < maxTries) {
