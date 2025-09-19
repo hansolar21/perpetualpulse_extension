@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perpetualpulse Trading Metrics
-// @version      1.6
-// @description  Injects long/short summary and leverage stats into lighter.xyz, now with robust equity detection & persistent masking
+// @version      1.7
+// @description  Injects long/short summary and leverage stats into lighter.xyz, now with robust equity detection & persistent masking (positions-table aware)
 // ==/UserScript==
 
 console.log("[Perpetualpulse] content.js injected");
@@ -141,7 +141,7 @@ function formatCopyEquationRow(onClick, id = "") {
         try {
             const eq = await onClick();
             const prev = labelSpan.innerText;
-            labelSpan.innerText = eq;
+            labelSpan.innerText = eq || "Copied!";
             setTimeout(() => (labelSpan.innerText = prev), 2500);
         } catch (err) {
             console.error("[Perpetualpulse] Copy TV equation failed:", err);
@@ -206,6 +206,12 @@ function safePortfolioValue() {
 }
 
 // ---------- Table helpers ----------
+
+// NEW: specific selector for the positions table
+function getPositionsTable() {
+    return document.querySelector('table[data-testid="positions-table"]') || document.querySelector("table");
+}
+
 function tableHasData(table) {
     const rows = table.querySelectorAll("tbody tr");
     for (let row of rows) {
@@ -227,26 +233,40 @@ function normalizeToUSDT(rawSymbol) {
     return `${sym.toUpperCase()}USDT`;
 }
 
+// NEW: grab symbol from structured spans in Market cell
+function getSymbolFromMarketCell(td0) {
+    // first <span> after the side bar is the token (HYPE, SOL...)
+    const spans = td0.querySelectorAll("span");
+    for (const sp of spans) {
+        const txt = (sp.textContent || "").trim();
+        if (txt && /^[A-Za-z0-9]{2,15}$/.test(txt)) return txt;
+    }
+    // fallback to innerText
+    return (td0.textContent || "").trim().split(/\s+/)[0] || "";
+}
+
 async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
     if (!table) throw new Error("No table");
-    const rows = table.querySelectorAll("tbody tr");
+
+    // NEW: the rows are absolute-positioned with data-testid="row-X"
+    const rows = table.querySelectorAll("tbody tr[data-testid^='row-']");
 
     const positions = [];
     rows.forEach((row) => {
         const tds = row.querySelectorAll("td");
         if (tds.length < 3) return;
 
-        const marketCellText = tds[0].innerText || "";
-        const lower = marketCellText.toLowerCase();
-        const isLong = lower.includes("\nlong");
-        const isShort = lower.includes("\nshort");
+        const td0 = tds[0];
+        const isLong = !!td0.querySelector('[data-testid="direction-long"]');   // NEW
+        const isShort = !!td0.querySelector('[data-testid="direction-short"]'); // NEW
         if (!isLong && !isShort) return;
 
         const notional = Math.abs(parseUSD(tds[2].innerText));
         if (!(notional > 0)) return;
 
+        const rawSym = getSymbolFromMarketCell(td0); // NEW
         positions.push({
-            symbol: normalizeToUSDT(marketCellText),
+            symbol: normalizeToUSDT(rawSym),
             side: isShort ? "Short" : "Long",
             notional,
         });
@@ -278,7 +298,7 @@ function injectMetrics() {
     if (!container) return;
     container.querySelectorAll('[data-injected="ls-info"]').forEach((el) => el.remove());
 
-    const table = document.querySelector("table");
+    const table = getPositionsTable(); // NEW
     if (!table) return;
 
     let longSum = 0,
@@ -288,17 +308,22 @@ function injectMetrics() {
     let longCount = 0,
         shortCount = 0;
 
-    const rows = table.querySelectorAll("tbody tr");
+    // NEW: target explicit row nodes
+    const rows = table.querySelectorAll("tbody tr[data-testid^='row-']");
     rows.forEach((row) => {
         const tds = row.querySelectorAll("td");
         if (tds.length < 3) return;
 
-        const marketText = (tds[0].innerText || "").trim().toLowerCase();
+        const td0 = tds[0];
         const value = parseUSD(tds[2].innerText);
-        const isLong = marketText.includes("\nlong");
-        const isShort = marketText.includes("\nshort");
-        const levMatch = marketText.match(/(\d+(\.\d+)?)x/);
-        const leverage = levMatch ? parseFloat(levMatch[1]) : 0;
+
+        // NEW: detect side via data-testid markers
+        const isLong = !!td0.querySelector('[data-testid="direction-long"]');
+        const isShort = !!td0.querySelector('[data-testid="direction-short"]');
+
+        // NEW: leverage is the "20x"/"50x" span in td0
+        const levTxt = td0.querySelector('span[data-state]')?.textContent || "";
+        const leverage = parseFloat(levTxt.replace(/x/i, "")) || 0;
 
         if (isLong) {
             longSum += value;
@@ -361,7 +386,7 @@ function injectMetrics() {
         ),
         formatCopyEquationRow(
             () => {
-                const tableEl = document.querySelector("table");
+                const tableEl = getPositionsTable(); // NEW
                 return copyTradingViewEquationFromTable(tableEl, 4);
             },
             "ls-line-tv"
@@ -384,7 +409,7 @@ function observeTable(table) {
 }
 
 function waitForDomAndData() {
-    const table = document.querySelector("table");
+    const table = getPositionsTable(); // NEW
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
 
     if (table && container && tableHasData(table)) {
