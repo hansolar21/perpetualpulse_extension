@@ -269,12 +269,14 @@ function getFundingRate(symbol) {
     const sym = (symbol || "").toUpperCase();
 
     // Prefer live WS current_funding_rate (predicted next rate)
+    // WS values are already in percentage form (e.g. 0.0048 = 0.0048%)
+    // Convert to raw decimal to match REST format (divide by 100)
     const marketId = _symbolToMarketId[sym];
     if (marketId !== undefined && _wsFundingRates[marketId] !== undefined) {
-        return _wsFundingRates[marketId];
+        return _wsFundingRates[marketId] / 100;
     }
 
-    // Fallback to REST settled rate
+    // Fallback to REST settled rate (already raw decimal, e.g. 4.8e-05 = 0.0048%)
     const rates = _fundingRates[sym];
     if (!rates) return null;
     return rates.lighter ?? rates.binance ?? rates.bybit ?? Object.values(rates)[0] ?? null;
