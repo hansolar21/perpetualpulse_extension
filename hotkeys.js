@@ -71,23 +71,7 @@
             const btn = document.querySelector('[data-testid="select-order-type-limit"]');
             if (btn) setTimeout(() => { btn.click(); setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 100); }, 0);
         }
-        if (tab === 'twap') {
-            // TWAP is inside the dropdown triggered by select-order-type-dropdown
-            const dropdownBtn = document.querySelector('[data-testid="select-order-type-dropdown"]');
-            if (dropdownBtn) {
-                dropdownBtn.click();
-                const findAndClickTwap = (retries = 15) => {
-                    const twapEl = document.querySelector('[data-testid="select-order-type-twap"]');
-                    if (twapEl) {
-                        twapEl.click();
-                        setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 150);
-                        return;
-                    }
-                    if (retries > 0) setTimeout(() => findAndClickTwap(retries - 1), 50);
-                };
-                setTimeout(() => findAndClickTwap(), 80);
-            }
-        }
+        // twap handled directly in keydown as two-step: ⌥A then ⌥T
     }
     function switchToSide(side) {
         const sideRow = document.querySelector('div.relative.flex.h-8');
@@ -204,8 +188,23 @@
                     switchToSide('sell');
                     e.preventDefault();
                     break;
+                case 'KeyA':
+                    // Open the advanced order type dropdown
+                    {
+                        const dd = document.querySelector('[data-testid="select-order-type-dropdown"]');
+                        if (dd) dd.click();
+                    }
+                    e.preventDefault();
+                    break;
                 case 'KeyT':
-                    switchToOrderTab('twap');
+                    // Select TWAP from the already-open dropdown
+                    {
+                        const twap = document.querySelector('[data-testid="select-order-type-twap"]');
+                        if (twap) {
+                            twap.click();
+                            setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 150);
+                        }
+                    }
                     e.preventDefault();
                     break;
             }
