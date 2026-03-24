@@ -10,8 +10,8 @@ console.log("[Perpetualpulse] patch loaded at", performance.now());
 window._patch_test = 1;
 
 // Extension accent color — slight bluish hue to distinguish injected content
-const EXT_COLOR = "rgba(130, 170, 255, 0.85)";
-const EXT_COLOR_DIM = "rgba(130, 170, 255, 0.55)";
+const EXT_COLOR = "rgba(160, 195, 255, 0.95)";
+const EXT_COLOR_DIM = "rgba(160, 195, 255, 0.70)";
 const EXT_BG = "transparent";
 
 let lastHref = location.href;
@@ -337,7 +337,23 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
 
 // ---------- Column resizing & funding injection ----------
 
-// Column resizing removed — Lighter uses virtualized table with fixed column widths
+// Column width adjustments via CSS
+function adjustColumnWidths() {
+    const styleId = "pp-col-widths";
+    if (document.getElementById(styleId)) return;
+    const style = document.createElement("style");
+    style.id = styleId;
+    // Lighter positions table uses nth-child for column sizing
+    // Reduce Size column, expand Funding column
+    style.textContent = `
+        table[data-testid="positions-table"] th:nth-child(3),
+        table[data-testid="positions-table"] td:nth-child(3) {
+            max-width: 70% !important;
+            width: 70% !important;
+        }
+    `;
+    document.head.appendChild(style);
+}
 
 function injectFundingRatesIntoTable(table) {
     if (!table) return;
@@ -391,8 +407,8 @@ function injectFundingRatesIntoTable(table) {
             const rateEl = document.createElement("span");
             rateEl.setAttribute("data-pp-funding", "1");
             rateEl.style.color = rate >= 0 ? "rgba(130, 255, 170, 0.9)" : "rgba(255, 130, 130, 0.9)";
-            rateEl.style.fontSize = "10px";
-            rateEl.style.fontFamily = "monospace";
+            rateEl.style.fontSize = "inherit";
+            rateEl.style.fontFamily = "inherit";
             rateEl.style.marginRight = "4px";
             rateEl.textContent = formatFundingRate(rate);
 
@@ -415,6 +431,7 @@ async function injectMetrics() {
 
     // Fetch funding rates (cached, non-blocking after first load)
     await fetchFundingRates();
+    adjustColumnWidths();
 
     // Inject funding rates into position rows
     injectFundingRatesIntoTable(table);

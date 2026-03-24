@@ -49,7 +49,7 @@
     // Add styles for all hotkey badges
     const style = document.createElement('style');
     style.innerHTML = `
-    .market-hotkey span, .limit-hotkey span, .buy-hotkey span, .sell-hotkey span {
+    .market-hotkey span, .limit-hotkey span, .twap-hotkey span, .buy-hotkey span, .sell-hotkey span {
         margin-left: 0.5em;
         font-size: 0.8em;
         padding: 0.1em 0.4em;
@@ -70,6 +70,22 @@
         if (tab === 'limit') {
             const btn = document.querySelector('[data-testid="select-order-type-limit"]');
             if (btn) setTimeout(() => { btn.click(); setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 100); }, 0);
+        }
+        if (tab === 'twap') {
+            // TWAP is inside the Advanced dropdown — click dropdown first, then TWAP option
+            const advancedBtn = document.querySelector('[data-testid="select-order-type-advanced"]') ||
+                Array.from(document.querySelectorAll('button')).find(b => /advanced/i.test(b.textContent));
+            if (advancedBtn) {
+                advancedBtn.click();
+                setTimeout(() => {
+                    const twapOption = document.querySelector('[data-testid="select-order-type-twap"]') ||
+                        Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], button, div[class*="menu"] div, div[class*="dropdown"] div')).find(el => /twap/i.test(el.textContent));
+                    if (twapOption) {
+                        twapOption.click();
+                        setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 100);
+                    }
+                }, 150);
+            }
         }
     }
     function switchToSide(side) {
@@ -112,6 +128,22 @@
                     span.className = 'limit-hotkey';
                     span.innerHTML = ` <span>${keyBadge('L')}</span>`;
                     limitBtn.appendChild(span);
+                }
+            } else if (span) {
+                span.remove();
+            }
+        }
+        // TWAP (Advanced dropdown)
+        const advBtn = document.querySelector('[data-testid="select-order-type-advanced"]') ||
+            Array.from(document.querySelectorAll('button')).find(b => /advanced/i.test(b.textContent));
+        if (advBtn) {
+            let span = advBtn.querySelector('.twap-hotkey');
+            if (show) {
+                if (!span) {
+                    span = document.createElement('span');
+                    span.className = 'twap-hotkey';
+                    span.innerHTML = ` <span>${keyBadge('T')} TWAP</span>`;
+                    advBtn.appendChild(span);
                 }
             } else if (span) {
                 span.remove();
@@ -185,6 +217,10 @@
                     break;
                 case 'KeyS':
                     switchToSide('sell');
+                    e.preventDefault();
+                    break;
+                case 'KeyT':
+                    switchToOrderTab('twap');
                     e.preventDefault();
                     break;
             }
