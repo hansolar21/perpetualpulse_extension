@@ -191,8 +191,25 @@
                 case 'KeyA':
                     // Open the advanced order type dropdown
                     {
-                        const dd = document.querySelector('[data-testid="select-order-type-dropdown"]');
-                        if (dd) dd.click();
+                        // Try data-testid first, fallback to finding button with "advanced" text
+                        let dd = document.querySelector('[data-testid="select-order-type-dropdown"]');
+                        if (!dd) {
+                            // Fallback: find the button/div containing "Advanced" near the order type tabs
+                            const btns = document.querySelectorAll('button, [role="button"]');
+                            for (const b of btns) {
+                                if (/^advanced$/i.test(b.textContent.trim()) || 
+                                    b.querySelector('span')?.textContent.trim().toLowerCase() === 'advanced') {
+                                    dd = b;
+                                    break;
+                                }
+                            }
+                        }
+                        if (dd) {
+                            // Radix triggers need pointer events, not just click()
+                            dd.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+                            dd.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+                            dd.click();
+                        }
                     }
                     e.preventDefault();
                     break;
