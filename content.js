@@ -169,12 +169,81 @@ function computeRiskMetrics(positions, equity) {
     return { netBeta, valueAtRisk, probLiq };
 }
 
-// ---------- Funding Rate Cache ----------
+// ---------- Funding Rate Cache (WebSocket + REST fallback) ----------
 let _fundingRates = {};  // symbol -> { lighter: rate, binance: rate, ... }
+let _wsFundingRates = {}; // market_id -> current_funding_rate (from WS)
 let _fundingLastFetch = 0;
-const FUNDING_CACHE_MS = 30_000; // refresh every 30s
+const FUNDING_CACHE_MS = 30_000; // REST fallback refresh every 30s
+let _fundingWs = null;
+let _fundingWsRetries = 0;
+const FUNDING_WS_MAX_RETRIES = 10;
+
+// market_id -> symbol reverse map (built from _symbolToMarketId)
+function getMarketIdToSymbol() {
+    const map = {};
+    for (const [sym, mid] of Object.entries(_symbolToMarketId)) {
+        map[mid] = sym;
+    }
+    return map;
+}
+
+function connectFundingWebSocket() {
+    if (_fundingWs && (_fundingWs.readyState === WebSocket.OPEN || _fundingWs.readyState === WebSocket.CONNECTING)) return;
+
+    try {
+        _fundingWs = new WebSocket("wss://mainnet.zklighter.elliot.ai/stream?encoding=json&readonly=true");
+
+        _fundingWs.onopen = () => {
+            console.log("[Perpetualpulse] Funding WS connected");
+            _fundingWsRetries = 0;
+            // Subscribe to market stats (includes current_funding_rate)
+            _fundingWs.send(JSON.stringify({ type: "subscribe", channel: "market_stats/all", flush_interval: "5000" }));
+        };
+
+        _fundingWs.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === "ping") {
+                    _fundingWs.send(JSON.stringify({ type: "pong" }));
+                    return;
+                }
+                // Handle both subscribed/market_stats and update/market_stats
+                if (msg.type === "subscribed/market_stats" || msg.type === "update/market_stats") {
+                    const stats = msg.market_stats || {};
+                    for (const [marketId, data] of Object.entries(stats)) {
+                        if (data.current_funding_rate !== undefined) {
+                            _wsFundingRates[marketId] = Number(data.current_funding_rate);
+                        }
+                    }
+                }
+            } catch (e) {
+                // ignore parse errors
+            }
+        };
+
+        _fundingWs.onclose = () => {
+            _fundingWs = null;
+            if (_fundingWsRetries < FUNDING_WS_MAX_RETRIES) {
+                const delay = Math.min(3000 * Math.pow(1.5, _fundingWsRetries), 30000);
+                _fundingWsRetries++;
+                console.log(`[Perpetualpulse] Funding WS closed, reconnecting in ${Math.round(delay)}ms (attempt ${_fundingWsRetries})`);
+                setTimeout(connectFundingWebSocket, delay);
+            }
+        };
+
+        _fundingWs.onerror = () => {
+            // onclose will fire after this
+        };
+    } catch (e) {
+        console.warn("[Perpetualpulse] Failed to open funding WS:", e);
+    }
+}
 
 async function fetchFundingRates() {
+    // Start WS if not running
+    connectFundingWebSocket();
+
+    // Also fetch REST as fallback / for other exchange rates
     if (Date.now() - _fundingLastFetch < FUNDING_CACHE_MS && Object.keys(_fundingRates).length > 0) {
         return _fundingRates;
     }
@@ -198,9 +267,16 @@ async function fetchFundingRates() {
 
 function getFundingRate(symbol) {
     const sym = (symbol || "").toUpperCase();
+
+    // Prefer live WS current_funding_rate (predicted next rate)
+    const marketId = _symbolToMarketId[sym];
+    if (marketId !== undefined && _wsFundingRates[marketId] !== undefined) {
+        return _wsFundingRates[marketId];
+    }
+
+    // Fallback to REST settled rate
     const rates = _fundingRates[sym];
     if (!rates) return null;
-    // Prefer lighter's own rate, then binance, then first available
     return rates.lighter ?? rates.binance ?? rates.bybit ?? Object.values(rates)[0] ?? null;
 }
 
