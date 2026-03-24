@@ -71,9 +71,9 @@ function getFundingRate(symbol) {
 
 function formatFundingRate(rate) {
     if (rate === null || rate === undefined) return "";
-    const pct = (rate * 100).toFixed(4);
-    const sign = rate >= 0 ? "+" : "";
-    return `${sign}${pct}%`;
+    const bps = rate * 10000; // basis points
+    const sign = bps >= 0 ? "+" : "";
+    return `${sign}${bps.toFixed(1)}bp`;
 }
 
 // ---------- Utils ----------
@@ -389,16 +389,16 @@ function injectFundingRatesIntoTable(table) {
         fundingTd.querySelectorAll("[data-pp-funding]").forEach((el) => el.remove());
 
         if (rate !== null) {
-            const rateEl = document.createElement("div");
+            const rateEl = document.createElement("span");
             rateEl.setAttribute("data-pp-funding", "1");
             rateEl.style.color = rate >= 0 ? "rgba(130, 255, 170, 0.9)" : "rgba(255, 130, 130, 0.9)";
-            rateEl.style.fontSize = "10px";
-            rateEl.style.lineHeight = "1.2";
+            rateEl.style.fontSize = "9px";
+            rateEl.style.marginRight = "3px";
             rateEl.style.whiteSpace = "nowrap";
             rateEl.textContent = formatFundingRate(rate);
 
-            // Append below existing content
-            fundingTd.appendChild(rateEl);
+            // Insert before existing content
+            fundingTd.insertBefore(rateEl, fundingTd.firstChild);
         }
     });
 }
