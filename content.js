@@ -698,7 +698,7 @@ async function injectMetrics() {
     // Risk metrics (only show if constants loaded)
     if (risk) {
         newRows.push(
-            formatRow("Value at Risk:", fmtPct(risk.valueAtRisk), "ls-line-var", true),
+            formatRow("Value at Risk:", fmtPct(risk.valueAtRisk), "ls-line-var"),
             formatRow("Net Beta:", risk.netBeta.toFixed(2), "ls-line-beta"),
             formatRow("Risk of Liq:", fmtPct(risk.probLiq), "ls-line-liq"),
         );

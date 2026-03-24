@@ -22,6 +22,12 @@ All metrics update live as positions change — no manual refresh needed.
 - Color-coded: green for positive, red for negative
 - Positions table columns automatically adjusted (Size narrowed, Funding widened) to accommodate the extra data
 
+### Risk Metrics
+- **Value at Risk (VaR)** — maximum expected loss over 24H at 95% confidence, matching Lighter's quant page calculation
+- **Net Beta** — weighted average beta across all positions, indicating overall market risk exposure
+- **Risk of Liquidation** — probability of liquidation based on per-position volatility and distance to liquidation price
+- Risk constants (volatility, beta, drift per market) are automatically extracted from the Lighter frontend bundle on page load — always in sync with Lighter's own calculations
+
 ### Visual Distinction
 All extension-injected content uses a slight bluish hue to distinguish it from native Lighter UI elements.
 
