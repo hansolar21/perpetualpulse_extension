@@ -240,6 +240,20 @@ function formatCopyEquationRow(onCopyClick, onToggleRequest, id = "") {
 function parseUSD(str) { return parseFloat(str.replace(/[$,%x]/gi, '')) || 0; }
 
 function getPortfolioValue() {
+    // PRIMARY: use data-testid attributes (stable across UI updates)
+    for (const testId of [
+        'account-overview-perps-equity',
+        'account-overview-total-account-value'
+    ]) {
+        const el = document.querySelector(`[data-testid="${testId}"]`);
+        if (el) {
+            const valEl = el.querySelector('.tabular-nums span, span') || el;
+            const val = parseUSD(valEl.textContent);
+            if (isFinite(val) && val > 0) return val;
+        }
+    }
+
+    // FALLBACK: scan by label text
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
     if (!container) return 0;
     const rows = container.querySelectorAll('div.flex.w-full.items-center.justify-between');
@@ -247,7 +261,7 @@ function getPortfolioValue() {
         const labelSpan = row.querySelector('span.text-xs.text-gray-3, span.text-xs.text-gray-3.underline, span.text-xs');
         if (!labelSpan) continue;
         const ltxt = labelSpan.innerText.trim().toLowerCase();
-        if (ltxt.includes("portfolio") || ltxt.includes("equity")) {
+        if (ltxt.includes("portfolio") || ltxt.includes("equity") || ltxt.includes("unified")) {
             const valueSpan = row.querySelector('span.text-xs.text-gray-0, span.text-xs');
             if (valueSpan) return parseUSD(valueSpan.innerText);
         }

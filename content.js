@@ -168,27 +168,40 @@ function parseUSD(str) {
 let _lastGoodEquity = 0;
 
 function getPortfolioValue() {
+    // PRIMARY: use data-testid attributes (stable across UI updates)
+    // Try perps equity first (most relevant for position metrics), then total
+    for (const testId of [
+        'account-overview-perps-equity',
+        'account-overview-total-account-value'
+    ]) {
+        const el = document.querySelector(`[data-testid="${testId}"]`);
+        if (el) {
+            // The value is typically in a nested span with tabular-nums or similar
+            const valEl = el.querySelector('.tabular-nums span, span') || el;
+            const val = parseUSD(valEl.textContent);
+            if (isFinite(val) && val > 0) return val;
+        }
+    }
+
+    // FALLBACK: scan the account overview container by label text
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
     if (!container) return 0;
 
-    // Support both old and new class combos; anchor to direct children
     const rows = container.querySelectorAll(
         ':scope > div.flex.w-full.justify-between, :scope > div.flex.w-full.items-center.justify-between'
     );
 
     for (const row of rows) {
-        // Label can be a <p> or <span>
         const labelEl = row.querySelector('p, span');
         const label = (labelEl?.textContent || "").trim().toLowerCase();
 
-        // Be generous with matching to survive copy tweaks
         if (
             /trading\s*equity/.test(label) ||
             /portfolio\s*value/.test(label) ||
             /perps?\s*equity/.test(label) ||
+            /unified\s*equity/.test(label) ||
             /\bequity\b/.test(label)
         ) {
-            // Value usually sits in '.tabular-nums span', but fall back broadly
             const valueSpan = row.querySelector('.tabular-nums span, span.text-xs.text-gray-0, span');
             if (valueSpan) {
                 const val = parseUSD(valueSpan.textContent);
