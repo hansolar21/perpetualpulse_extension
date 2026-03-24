@@ -2,43 +2,48 @@
 
 ## Summary
 
-A lightweight browser extension that injects real-time trading metrics—including long/short exposure and leverage stats—directly into the [Lighter.xyz](https://lighter.xyz) trading interface.
-Also supports hotkeys
+A lightweight browser extension that injects real-time trading metrics, live funding rates, and keyboard shortcuts directly into the [Lighter.xyz](https://lighter.xyz) trading interface.
 
-## Metrics
+## Features
 
-- **Live summary:** Shows your total long/short portfolio exposure, leverage ratios, and count of positions.
-- **Automatic refresh:** Updates automatically when you open new trades, close positions, or refresh the page—no manual reload required.
-- **Non-intrusive:** Integrates cleanly into the existing account overview panel, with no external dependencies.
-- **Show/Hide Values**: Toggle visibility of the metrics with a single click.
+### Portfolio Metrics
+- **Long vs Short:** Dollar exposure on both sides
+- **L/S Ratio:** Relative size of longs to shorts
+- **Exposure vs Portfolio:** Leverage vs portfolio value, with pair counts
+- **Net Leverage:** Overall directional leverage across all positions
+- **TradingView Equation:** One-click copy of a weighted portfolio equation for TradingView charting
+- **Show/Hide Values:** Click any metric value to mask it
 
-## What It Does
+All metrics update live as positions change — no manual refresh needed.
 
-Once loaded on [Lighter.xyz](https://lighter.xyz), this extension adds a summary under your Account Overview:
+### Live Funding Rates
+- Fetches funding rates from the Lighter API every 30 seconds
+- Displays the current funding rate inline in the Funding column of the positions table
+- Color-coded: green for positive, red for negative
+- Positions table columns automatically adjusted (Size narrowed, Funding widened) to accommodate the extra data
 
-- **Long vs Short:** Dollar exposure on both sides.
-- **L/S Ratio:** Relative size of longs to shorts.
-- **Exposure vs Portfolio:** Leverage vs portfolio value, with average leverage.
-- **Net Leverage:** Overall leverage across all positions.
-- Updates live as your positions change.
+### Visual Distinction
+All extension-injected content uses a slight bluish hue to distinguish it from native Lighter UI elements.
 
 ## Hotkey Controls
 
 Speed up trading with built-in keyboard shortcuts:
 
-| Action                       | Mac Shortcut | Windows/Linux Shortcut |
-|------------------------------|--------------|-----------------------|
-| Switch to Market tab         | ⌥ + M        | Alt + M               |
-| Switch to Limit tab          | ⌥ + L        | Alt + L               |
-| Switch to Buy side           | ⌥ + B        | Alt + B               |
-| Switch to Sell side          | ⌥ + S        | Alt + S               |
-| Execute trade (in Amount input) | Enter   | Enter                 |
-| **Show/hide hotkey badges**  | **Double-tap Option** | **Double-tap Alt**  |
+| Action | Mac | Windows/Linux |
+|---|---|---|
+| Switch to Market tab | ⌥ + M | Alt + M |
+| Switch to Limit tab | ⌥ + L | Alt + L |
+| Open Advanced dropdown | ⌥ + A | Alt + A |
+| Select TWAP (when dropdown open) | ⌥ + T | Alt + T |
+| Switch to Buy side | ⌥ + B | Alt + B |
+| Switch to Sell side | ⌥ + S | Alt + S |
+| Execute trade (in Amount input) | Enter | Enter |
+| **Show/hide hotkey badges** | **Double-tap ⌥** | **Double-tap Alt** |
 
-
-- **Badges**: Hotkey hints appear next to each tab or side button for your operating system (⌥ for Mac, Alt for Windows/Linux) while you hold Option/Alt.
-- **Focus**: After any tab or side hotkey, your cursor jumps to the Amount input—just type your size.
-- **One-touch trading**: Press **Enter** while the Amount input is focused to immediately place your order (if the Place Order button is enabled).
+- **Badges**: Hotkey hints appear next to tabs/buttons while holding Option/Alt.
+- **Focus**: After any hotkey, cursor jumps to the Amount input.
+- **One-touch trading**: Press **Enter** while Amount input is focused to place your order.
+- **TWAP workflow**: Press ⌥+A to open the Advanced dropdown, then ⌥+T to select TWAP.
 
 ### Example Workflow
 
@@ -53,8 +58,8 @@ Speed up trading with built-in keyboard shortcuts:
 
 1. **Download the extension ZIP** and unzip it to a folder on your computer.
 2. Open your browser and go to `chrome://extensions` (or menu > Extensions).
-3. **Enable “Developer mode”** (toggle in the top-right).
-4. Click **“Load unpacked”** and select the folder you just unzipped.
-5. Visit [https://lighter.xyz](https://lighter.xyz) — the metrics will appear automatically.
+3. **Enable "Developer mode"** (toggle in the top-right).
+4. Click **"Load unpacked"** and select the folder you just unzipped.
+5. Visit [https://app.lighter.xyz](https://app.lighter.xyz) — the metrics will appear automatically.
 
-**To update:** Simply remove the old version and repeat with your latest code.
+**To update:** Pull latest changes and click the refresh icon on `chrome://extensions`.
