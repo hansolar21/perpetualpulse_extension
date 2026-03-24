@@ -1,14 +1,18 @@
 // ==UserScript==
 // @name         Perpetualpulse Trading Metrics
-// @version      1.7
-// @description  Injects long/short summary and leverage stats into lighter.xyz, now with robust equity detection & persistent masking (positions-table aware)
+// @version      1.8
+// @description  Injects long/short summary, leverage stats, and live funding rates into lighter.xyz
 // ==/UserScript==
 
 console.log("[Perpetualpulse] content.js injected");
-
-// Debugging
 console.log("[Perpetualpulse] patch loaded at", performance.now());
+
 window._patch_test = 1;
+
+// Extension accent color — slight bluish hue to distinguish injected content
+const EXT_COLOR = "rgba(130, 170, 255, 0.85)";
+const EXT_COLOR_DIM = "rgba(130, 170, 255, 0.55)";
+const EXT_BG = "rgba(100, 150, 255, 0.06)";
 
 let lastHref = location.href;
 
@@ -30,6 +34,48 @@ let observer = null;
 // Persistent mask state (id -> true = masked)
 const maskedRows = {};
 
+// ---------- Funding Rate Cache ----------
+let _fundingRates = {};  // symbol -> { lighter: rate, binance: rate, ... }
+let _fundingLastFetch = 0;
+const FUNDING_CACHE_MS = 30_000; // refresh every 30s
+
+async function fetchFundingRates() {
+    if (Date.now() - _fundingLastFetch < FUNDING_CACHE_MS && Object.keys(_fundingRates).length > 0) {
+        return _fundingRates;
+    }
+    try {
+        const resp = await fetch("https://mainnet.zklighter.elliot.ai/api/v1/fundingRates");
+        const data = await resp.json();
+        const rates = data.funding_rates || data.fundingRates || [];
+        const newRates = {};
+        for (const r of rates) {
+            const sym = (r.symbol || "").toUpperCase();
+            if (!newRates[sym]) newRates[sym] = {};
+            newRates[sym][r.exchange || "lighter"] = r.rate;
+        }
+        _fundingRates = newRates;
+        _fundingLastFetch = Date.now();
+    } catch (e) {
+        console.warn("[Perpetualpulse] Failed to fetch funding rates:", e);
+    }
+    return _fundingRates;
+}
+
+function getFundingRate(symbol) {
+    const sym = (symbol || "").toUpperCase();
+    const rates = _fundingRates[sym];
+    if (!rates) return null;
+    // Prefer lighter's own rate, then binance, then first available
+    return rates.lighter ?? rates.binance ?? rates.bybit ?? Object.values(rates)[0] ?? null;
+}
+
+function formatFundingRate(rate) {
+    if (rate === null || rate === undefined) return "";
+    const pct = (rate * 100).toFixed(4);
+    const sign = rate >= 0 ? "+" : "";
+    return `${sign}${pct}%`;
+}
+
 // ---------- Utils ----------
 function applyMask(span, realText, isMasked) {
     if (isMasked) {
@@ -46,9 +92,12 @@ function formatRow(label, value, id = "", isFirst = false) {
     row.className = "flex w-full items-center justify-between";
     row.setAttribute("data-injected", "ls-info");
     if (id) row.setAttribute("data-injected-id", id);
+    row.style.backgroundColor = EXT_BG;
+    row.style.borderRadius = "2px";
+    row.style.padding = "0 2px";
 
     if (isFirst) {
-        row.style.borderTop = "1px solid rgba(255,255,255,0.1)";
+        row.style.borderTop = "1px solid rgba(130, 170, 255, 0.15)";
         row.style.paddingTop = "4px";
         row.style.marginTop = "4px";
     }
@@ -57,12 +106,15 @@ function formatRow(label, value, id = "", isFirst = false) {
     labelDiv.setAttribute("data-state", "closed");
 
     const labelSpan = document.createElement("span");
-    labelSpan.className = "text-xs text-gray-2 underline";
+    labelSpan.className = "text-xs";
     labelSpan.innerText = label;
     labelSpan.style.cursor = "pointer";
+    labelSpan.style.color = EXT_COLOR_DIM;
+    labelSpan.style.textDecoration = "underline";
 
     const valueSpan = document.createElement("span");
-    valueSpan.className = "text-xs text-gray-0";
+    valueSpan.className = "text-xs";
+    valueSpan.style.color = EXT_COLOR;
     valueSpan.setAttribute("data-real", value);
 
     const isMasked = !!maskedRows[id];
@@ -81,29 +133,31 @@ function formatRow(label, value, id = "", isFirst = false) {
     return row;
 }
 
-/** Action row: whole line clickable to copy equation; shows 📋 icon, hover color, and ⓘ tooltip */
+/** Action row: whole line clickable to copy equation */
 function formatCopyEquationRow(onClick, id = "") {
     const row = document.createElement("div");
     row.className = "flex w-full items-center justify-between";
     row.setAttribute("data-injected", "ls-info");
     if (id) row.setAttribute("data-injected-id", id);
+    row.style.backgroundColor = EXT_BG;
+    row.style.borderRadius = "2px";
+    row.style.padding = "0 2px";
 
-    // LEFT side: [📋 Copy TradingView equation] [ⓘ]
     const leftWrap = document.createElement("div");
     leftWrap.className = "flex items-center gap-2";
 
     const labelSpan = document.createElement("span");
-    labelSpan.className = "text-xs text-gray-2 underline";
+    labelSpan.className = "text-xs";
     labelSpan.innerText = "Copy TradingView equation";
     labelSpan.style.cursor = "pointer";
+    labelSpan.style.color = EXT_COLOR_DIM;
+    labelSpan.style.textDecoration = "underline";
 
-    // Copy icon
     const icon = document.createElement("span");
     icon.innerText = "📋";
     icon.setAttribute("aria-hidden", "true");
     icon.style.fontSize = "12px";
 
-    // ⓘ tooltip
     const info = document.createElement("span");
     info.innerText = "ⓘ";
     info.setAttribute(
@@ -113,29 +167,23 @@ function formatCopyEquationRow(onClick, id = "") {
     info.style.cursor = "help";
     info.style.fontSize = "12px";
     info.style.opacity = "0.8";
+    info.style.color = EXT_COLOR_DIM;
 
     leftWrap.appendChild(icon);
     leftWrap.appendChild(labelSpan);
     leftWrap.appendChild(info);
 
-    // Entire row acts as a button
     row.style.cursor = "pointer";
     row.style.userSelect = "none";
 
-    // Hover effect
-    const baseColor = "rgba(255,255,255,0.6)";
     const hoverColor = "rgb(212, 68, 77)";
-    labelSpan.style.color = baseColor;
     row.addEventListener("mouseenter", () => {
         labelSpan.style.color = hoverColor;
-        labelSpan.style.textDecoration = "underline";
     });
     row.addEventListener("mouseleave", () => {
-        labelSpan.style.color = baseColor;
-        labelSpan.style.textDecoration = "underline";
+        labelSpan.style.color = EXT_COLOR_DIM;
     });
 
-    // Click handler
     const handler = async (e) => {
         e.stopPropagation();
         try {
@@ -160,7 +208,6 @@ function formatCopyEquationRow(onClick, id = "") {
 }
 
 function parseUSD(str) {
-    // Strip $, commas, %, x, spaces, NBSP
     return parseFloat((str || "").replace(/[\s\u00A0,$%x]/gi, "")) || 0;
 }
 
@@ -168,22 +215,18 @@ function parseUSD(str) {
 let _lastGoodEquity = 0;
 
 function getPortfolioValue() {
-    // PRIMARY: use data-testid attributes (stable across UI updates)
-    // Try perps equity first (most relevant for position metrics), then total
     for (const testId of [
         'account-overview-perps-equity',
         'account-overview-total-account-value'
     ]) {
         const el = document.querySelector(`[data-testid="${testId}"]`);
         if (el) {
-            // The value is typically in a nested span with tabular-nums or similar
             const valEl = el.querySelector('.tabular-nums span, span') || el;
             const val = parseUSD(valEl.textContent);
             if (isFinite(val) && val > 0) return val;
         }
     }
 
-    // FALLBACK: scan the account overview container by label text
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
     if (!container) return 0;
 
@@ -220,7 +263,6 @@ function safePortfolioValue() {
 
 // ---------- Table helpers ----------
 
-// NEW: specific selector for the positions table
 function getPositionsTable() {
     return document.querySelector('table[data-testid="positions-table"]') || document.querySelector("table");
 }
@@ -236,7 +278,6 @@ function tableHasData(table) {
     return false;
 }
 
-/** Normalize market symbol to TradingView symbol (force USDT, strip leading lowercase 'k') */
 function normalizeToUSDT(rawSymbol) {
     if (!rawSymbol) return "";
     let sym = String(rawSymbol).split("\n")[0].trim();
@@ -246,22 +287,18 @@ function normalizeToUSDT(rawSymbol) {
     return `${sym.toUpperCase()}USDT`;
 }
 
-// NEW: grab symbol from structured spans in Market cell
 function getSymbolFromMarketCell(td0) {
-    // first <span> after the side bar is the token (HYPE, SOL...)
     const spans = td0.querySelectorAll("span");
     for (const sp of spans) {
         const txt = (sp.textContent || "").trim();
         if (txt && /^[A-Za-z0-9]{2,15}$/.test(txt)) return txt;
     }
-    // fallback to innerText
     return (td0.textContent || "").trim().split(/\s+/)[0] || "";
 }
 
 async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
     if (!table) throw new Error("No table");
 
-    // NEW: the rows are absolute-positioned with data-testid="row-X"
     const rows = table.querySelectorAll("tbody tr[data-testid^='row-']");
 
     const positions = [];
@@ -270,14 +307,14 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
         if (tds.length < 3) return;
 
         const td0 = tds[0];
-        const isLong = !!td0.querySelector('[data-testid="direction-long"]');   // NEW
-        const isShort = !!td0.querySelector('[data-testid="direction-short"]'); // NEW
+        const isLong = !!td0.querySelector('[data-testid="direction-long"]');
+        const isShort = !!td0.querySelector('[data-testid="direction-short"]');
         if (!isLong && !isShort) return;
 
         const notional = Math.abs(parseUSD(tds[2].innerText));
         if (!(notional > 0)) return;
 
-        const rawSym = getSymbolFromMarketCell(td0); // NEW
+        const rawSym = getSymbolFromMarketCell(td0);
         positions.push({
             symbol: normalizeToUSDT(rawSym),
             side: isShort ? "Short" : "Long",
@@ -305,21 +342,104 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
     return equation;
 }
 
+// ---------- Column resizing & funding injection ----------
+
+function adjustColumnWidths(table) {
+    if (!table || table.getAttribute("data-pp-resized")) return;
+
+    // Find header cells to identify Size and Funding columns
+    const ths = table.querySelectorAll("thead th, thead td");
+    ths.forEach((th) => {
+        const text = (th.textContent || "").trim().toLowerCase();
+        if (text.includes("size")) {
+            // Shrink size column by 30%
+            const currentWidth = th.offsetWidth;
+            if (currentWidth > 0) {
+                th.style.width = Math.round(currentWidth * 0.7) + "px";
+                th.style.minWidth = Math.round(currentWidth * 0.7) + "px";
+            }
+        }
+        if (text.includes("funding")) {
+            // Expand funding column
+            const currentWidth = th.offsetWidth;
+            if (currentWidth > 0) {
+                th.style.width = Math.round(currentWidth * 1.4) + "px";
+                th.style.minWidth = Math.round(currentWidth * 1.4) + "px";
+            }
+        }
+    });
+
+    table.setAttribute("data-pp-resized", "1");
+}
+
+function injectFundingRatesIntoTable(table) {
+    if (!table) return;
+
+    const rows = table.querySelectorAll("tbody tr[data-testid^='row-']");
+
+    // Find which column index is the funding column
+    const ths = table.querySelectorAll("thead th, thead td");
+    let fundingColIdx = -1;
+    ths.forEach((th, i) => {
+        const text = (th.textContent || "").trim().toLowerCase();
+        if (text.includes("funding")) fundingColIdx = i;
+    });
+
+    if (fundingColIdx < 0) return;
+
+    rows.forEach((row) => {
+        const tds = row.querySelectorAll("td");
+        if (tds.length <= fundingColIdx) return;
+
+        const td0 = tds[0];
+        const symbol = getSymbolFromMarketCell(td0);
+        const rate = getFundingRate(symbol);
+
+        const fundingTd = tds[fundingColIdx];
+
+        // Remove any previously injected rate
+        fundingTd.querySelectorAll("[data-pp-funding]").forEach((el) => el.remove());
+
+        if (rate !== null) {
+            const rateEl = document.createElement("div");
+            rateEl.setAttribute("data-pp-funding", "1");
+            rateEl.style.color = rate >= 0 ? "rgba(130, 255, 170, 0.9)" : "rgba(255, 130, 130, 0.9)";
+            rateEl.style.fontSize = "11px";
+            rateEl.style.fontFamily = "monospace";
+            rateEl.style.lineHeight = "1.2";
+            rateEl.style.marginBottom = "1px";
+            rateEl.style.backgroundColor = EXT_BG;
+            rateEl.style.borderRadius = "2px";
+            rateEl.style.padding = "0 2px";
+            rateEl.textContent = formatFundingRate(rate);
+
+            // Insert before existing content
+            fundingTd.insertBefore(rateEl, fundingTd.firstChild);
+        }
+    });
+}
+
 // ---------- Core injection ----------
-function injectMetrics() {
+async function injectMetrics() {
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
     if (!container) return;
     container.querySelectorAll('[data-injected="ls-info"]').forEach((el) => el.remove());
 
-    const table = getPositionsTable(); // NEW
+    const table = getPositionsTable();
     if (!table) return;
+
+    // Fetch funding rates (cached, non-blocking after first load)
+    await fetchFundingRates();
+
+    // Adjust column widths and inject funding rates
+    adjustColumnWidths(table);
+    injectFundingRatesIntoTable(table);
 
     let longSum = 0,
         shortSum = 0;
     let longCount = 0,
         shortCount = 0;
 
-    // NEW: target explicit row nodes
     const rows = table.querySelectorAll("tbody tr[data-testid^='row-']");
     rows.forEach((row) => {
         const tds = row.querySelectorAll("td");
@@ -328,12 +448,8 @@ function injectMetrics() {
         const td0 = tds[0];
         const value = parseUSD(tds[2].innerText);
 
-        // NEW: detect side via data-testid markers
         const isLong = !!td0.querySelector('[data-testid="direction-long"]');
         const isShort = !!td0.querySelector('[data-testid="direction-short"]');
-
-        // The visible leverage badge shows MAX leverage (e.g. "50x"), not actual.
-        // Actual leverage = positionValue / equity, calculated below after the loop.
 
         if (isLong) {
             longSum += value;
@@ -348,10 +464,6 @@ function injectMetrics() {
 
     const longPVx = portVal ? longSum / portVal : 0;
     const shortPVx = portVal ? shortSum / portVal : 0;
-
-    // Average leverage per pair = total side exposure / (equity × count)
-    const avgLongLev = portVal && longCount ? longSum / portVal / longCount : 0;
-    const avgShortLev = portVal && shortCount ? shortSum / portVal / shortCount : 0;
 
     const total = longSum + shortSum;
     const longRatio = total > 0 ? (longSum / total).toFixed(2) : "0.00";
@@ -396,7 +508,7 @@ function injectMetrics() {
         ),
         formatCopyEquationRow(
             () => {
-                const tableEl = getPositionsTable(); // NEW
+                const tableEl = getPositionsTable();
                 return copyTradingViewEquationFromTable(tableEl, 4);
             },
             "ls-line-tv"
@@ -415,15 +527,13 @@ function observeTable(table) {
         injectMetrics();
     });
     observer.observe(table, { childList: true, subtree: true, characterData: true });
-    // console.log("[Perpetualpulse] MutationObserver attached.");
 }
 
 function waitForDomAndData() {
-    const table = getPositionsTable(); // NEW
+    const table = getPositionsTable();
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
 
     if (table && container && tableHasData(table)) {
-        // console.log("[Perpetualpulse] DOM & data found. Injecting metrics.");
         injectMetrics();
         observeTable(table);
     } else if (attempt < maxTries) {
