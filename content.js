@@ -12,7 +12,7 @@ window._patch_test = 1;
 // Extension accent color — slight bluish hue to distinguish injected content
 const EXT_COLOR = "rgba(130, 170, 255, 0.85)";
 const EXT_COLOR_DIM = "rgba(130, 170, 255, 0.55)";
-const EXT_BG = "rgba(100, 150, 255, 0.06)";
+const EXT_BG = "transparent";
 
 let lastHref = location.href;
 
@@ -92,10 +92,6 @@ function formatRow(label, value, id = "", isFirst = false) {
     row.className = "flex w-full items-center justify-between";
     row.setAttribute("data-injected", "ls-info");
     if (id) row.setAttribute("data-injected-id", id);
-    row.style.backgroundColor = EXT_BG;
-    row.style.borderRadius = "2px";
-    row.style.padding = "0 2px";
-
     if (isFirst) {
         row.style.borderTop = "1px solid rgba(130, 170, 255, 0.15)";
         row.style.paddingTop = "4px";
@@ -139,9 +135,6 @@ function formatCopyEquationRow(onClick, id = "") {
     row.className = "flex w-full items-center justify-between";
     row.setAttribute("data-injected", "ls-info");
     if (id) row.setAttribute("data-injected-id", id);
-    row.style.backgroundColor = EXT_BG;
-    row.style.borderRadius = "2px";
-    row.style.padding = "0 2px";
 
     const leftWrap = document.createElement("div");
     leftWrap.className = "flex items-center gap-2";
@@ -344,40 +337,14 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
 
 // ---------- Column resizing & funding injection ----------
 
-function adjustColumnWidths(table) {
-    if (!table || table.getAttribute("data-pp-resized")) return;
-
-    // Find header cells to identify Size and Funding columns
-    const ths = table.querySelectorAll("thead th, thead td");
-    ths.forEach((th) => {
-        const text = (th.textContent || "").trim().toLowerCase();
-        if (text.includes("size")) {
-            // Shrink size column by 30%
-            const currentWidth = th.offsetWidth;
-            if (currentWidth > 0) {
-                th.style.width = Math.round(currentWidth * 0.7) + "px";
-                th.style.minWidth = Math.round(currentWidth * 0.7) + "px";
-            }
-        }
-        if (text.includes("funding")) {
-            // Expand funding column
-            const currentWidth = th.offsetWidth;
-            if (currentWidth > 0) {
-                th.style.width = Math.round(currentWidth * 1.4) + "px";
-                th.style.minWidth = Math.round(currentWidth * 1.4) + "px";
-            }
-        }
-    });
-
-    table.setAttribute("data-pp-resized", "1");
-}
+// Column resizing removed — Lighter uses virtualized table with fixed column widths
 
 function injectFundingRatesIntoTable(table) {
     if (!table) return;
 
     const rows = table.querySelectorAll("tbody tr[data-testid^='row-']");
 
-    // Find which column index is the funding column
+    // Find funding column index by scanning headers
     const ths = table.querySelectorAll("thead th, thead td");
     let fundingColIdx = -1;
     ths.forEach((th, i) => {
@@ -385,7 +352,27 @@ function injectFundingRatesIntoTable(table) {
         if (text.includes("funding")) fundingColIdx = i;
     });
 
-    if (fundingColIdx < 0) return;
+    // Fallback: scan all columns for cells containing "$" that look like funding values
+    // Funding column is typically the last or second-to-last column with $ values
+    if (fundingColIdx < 0) {
+        // Try to detect from row data — funding cells often have small $ values
+        const firstRow = rows[0];
+        if (firstRow) {
+            const tds = firstRow.querySelectorAll("td");
+            for (let i = tds.length - 1; i >= 3; i--) {
+                const text = (tds[i].textContent || "").trim();
+                if (text.includes("$") && !text.includes("/")) {
+                    fundingColIdx = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (fundingColIdx < 0) {
+        console.log("[Perpetualpulse] Could not find funding column");
+        return;
+    }
 
     rows.forEach((row) => {
         const tds = row.querySelectorAll("td");
@@ -401,16 +388,12 @@ function injectFundingRatesIntoTable(table) {
         fundingTd.querySelectorAll("[data-pp-funding]").forEach((el) => el.remove());
 
         if (rate !== null) {
-            const rateEl = document.createElement("div");
+            const rateEl = document.createElement("span");
             rateEl.setAttribute("data-pp-funding", "1");
             rateEl.style.color = rate >= 0 ? "rgba(130, 255, 170, 0.9)" : "rgba(255, 130, 130, 0.9)";
-            rateEl.style.fontSize = "11px";
+            rateEl.style.fontSize = "10px";
             rateEl.style.fontFamily = "monospace";
-            rateEl.style.lineHeight = "1.2";
-            rateEl.style.marginBottom = "1px";
-            rateEl.style.backgroundColor = EXT_BG;
-            rateEl.style.borderRadius = "2px";
-            rateEl.style.padding = "0 2px";
+            rateEl.style.marginRight = "4px";
             rateEl.textContent = formatFundingRate(rate);
 
             // Insert before existing content
@@ -431,8 +414,7 @@ async function injectMetrics() {
     // Fetch funding rates (cached, non-blocking after first load)
     await fetchFundingRates();
 
-    // Adjust column widths and inject funding rates
-    adjustColumnWidths(table);
+    // Inject funding rates into position rows
     injectFundingRatesIntoTable(table);
 
     let longSum = 0,
@@ -518,13 +500,35 @@ async function injectMetrics() {
     newRows.forEach((row) => container.appendChild(row));
 }
 
+let _injectPending = false;
 function observeTable(table) {
     if (observer) {
         observer.disconnect();
         observer = null;
     }
-    observer = new MutationObserver(() => {
-        injectMetrics();
+    observer = new MutationObserver((mutations) => {
+        // Skip mutations caused by our own injections
+        const isOwnMutation = mutations.every(m => {
+            if (m.type === "childList") {
+                for (const node of m.addedNodes) {
+                    if (node.nodeType === 1 && (node.getAttribute?.("data-pp-funding") || node.getAttribute?.("data-injected"))) return true;
+                }
+                for (const node of m.removedNodes) {
+                    if (node.nodeType === 1 && (node.getAttribute?.("data-pp-funding") || node.getAttribute?.("data-injected"))) return true;
+                }
+            }
+            return false;
+        });
+        if (isOwnMutation) return;
+
+        // Debounce to prevent rapid re-fires
+        if (!_injectPending) {
+            _injectPending = true;
+            requestAnimationFrame(() => {
+                _injectPending = false;
+                injectMetrics();
+            });
+        }
     });
     observer.observe(table, { childList: true, subtree: true, characterData: true });
 }
