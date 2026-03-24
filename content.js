@@ -389,16 +389,16 @@ function injectFundingRatesIntoTable(table) {
         fundingTd.querySelectorAll("[data-pp-funding]").forEach((el) => el.remove());
 
         if (rate !== null) {
-            const rateEl = document.createElement("span");
+            const rateEl = document.createElement("div");
             rateEl.setAttribute("data-pp-funding", "1");
             rateEl.style.color = rate >= 0 ? "rgba(130, 255, 170, 0.9)" : "rgba(255, 130, 130, 0.9)";
-            rateEl.style.fontSize = "inherit";
-            rateEl.style.fontFamily = "inherit";
-            rateEl.style.marginRight = "4px";
+            rateEl.style.fontSize = "10px";
+            rateEl.style.lineHeight = "1.2";
+            rateEl.style.whiteSpace = "nowrap";
             rateEl.textContent = formatFundingRate(rate);
 
-            // Insert before existing content
-            fundingTd.insertBefore(rateEl, fundingTd.firstChild);
+            // Append below existing content
+            fundingTd.appendChild(rateEl);
         }
     });
 }
