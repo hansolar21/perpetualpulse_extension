@@ -72,27 +72,20 @@
             if (btn) setTimeout(() => { btn.click(); setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 100); }, 0);
         }
         if (tab === 'twap') {
-            // TWAP is inside the Advanced dropdown
-            // Step 1: Click the dropdown trigger to open it
-            const advancedBtn = document.querySelector('[data-testid="select-order-type-advanced"]') ||
-                Array.from(document.querySelectorAll('button')).find(b => /advanced/i.test(b.textContent));
-            if (advancedBtn) {
-                advancedBtn.click();
-                // Step 2: Wait for dropdown to render, then find TWAP and click it
-                const findAndClickTwap = (retries = 10) => {
-                    // Search broadly for TWAP option in any dropdown/popover/menu
-                    const candidates = document.querySelectorAll('[role="menuitem"], [role="option"], [data-testid*="twap"], [data-testid*="TWAP"], li, a, button, div, span');
-                    for (const el of candidates) {
-                        const text = (el.textContent || "").trim();
-                        if (/^twap$/i.test(text) || el.getAttribute?.("data-testid")?.toLowerCase().includes("twap")) {
-                            el.click();
-                            setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 150);
-                            return;
-                        }
+            // TWAP is inside the dropdown triggered by select-order-type-dropdown
+            const dropdownBtn = document.querySelector('[data-testid="select-order-type-dropdown"]');
+            if (dropdownBtn) {
+                dropdownBtn.click();
+                const findAndClickTwap = (retries = 15) => {
+                    const twapEl = document.querySelector('[data-testid="select-order-type-twap"]');
+                    if (twapEl) {
+                        twapEl.click();
+                        setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 150);
+                        return;
                     }
                     if (retries > 0) setTimeout(() => findAndClickTwap(retries - 1), 50);
                 };
-                setTimeout(() => findAndClickTwap(), 100);
+                setTimeout(() => findAndClickTwap(), 80);
             }
         }
     }

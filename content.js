@@ -337,59 +337,8 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
 
 // ---------- Column resizing & funding injection ----------
 
-// Column width adjustments — directly modify inline styles on table headers/cells
-function adjustColumnWidths() {
-    const table = getPositionsTable();
-    if (!table) return;
-
-    // Find header cells to identify column indices
-    const ths = table.querySelectorAll("thead th");
-    let sizeIdx = -1, fundingIdx = -1;
-    ths.forEach((th, i) => {
-        const text = (th.textContent || "").trim().toLowerCase();
-        if (text.includes("size") && sizeIdx < 0) sizeIdx = i;
-        if (text.includes("funding") && fundingIdx < 0) fundingIdx = i;
-    });
-
-    if (sizeIdx < 0 && fundingIdx < 0) return;
-
-    // Adjust header widths
-    function shrinkCol(th) {
-        const w = th.style.width || th.style.minWidth;
-        if (w) {
-            const px = parseFloat(w);
-            if (px > 0) {
-                const newW = Math.round(px * 0.7) + "px";
-                th.style.width = newW;
-                th.style.minWidth = newW;
-                th.style.maxWidth = newW;
-            }
-        }
-    }
-    function growCol(th) {
-        const w = th.style.width || th.style.minWidth;
-        if (w) {
-            const px = parseFloat(w);
-            if (px > 0) {
-                const newW = Math.round(px * 1.3) + "px";
-                th.style.width = newW;
-                th.style.minWidth = newW;
-                th.style.maxWidth = newW;
-            }
-        }
-    }
-
-    if (sizeIdx >= 0 && ths[sizeIdx]) shrinkCol(ths[sizeIdx]);
-    if (fundingIdx >= 0 && ths[fundingIdx]) growCol(ths[fundingIdx]);
-
-    // Apply same to all body rows
-    const rows = table.querySelectorAll("tbody tr");
-    rows.forEach(row => {
-        const tds = row.querySelectorAll("td");
-        if (sizeIdx >= 0 && tds[sizeIdx]) shrinkCol(tds[sizeIdx]);
-        if (fundingIdx >= 0 && tds[fundingIdx]) growCol(tds[fundingIdx]);
-    });
-}
+// Column width adjustments removed — Lighter virtualizes columns with fixed widths
+// that get compounded on re-injection. Funding rate shown inline is compact enough.
 
 function injectFundingRatesIntoTable(table) {
     if (!table) return;
@@ -467,7 +416,6 @@ async function injectMetrics() {
 
     // Fetch funding rates (cached, non-blocking after first load)
     await fetchFundingRates();
-    adjustColumnWidths();
 
     // Inject funding rates into position rows
     injectFundingRatesIntoTable(table);
