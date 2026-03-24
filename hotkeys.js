@@ -49,7 +49,7 @@
     // Add styles for all hotkey badges
     const style = document.createElement('style');
     style.innerHTML = `
-    .market-hotkey span, .limit-hotkey span, .twap-hotkey span, .buy-hotkey span, .sell-hotkey span {
+    .market-hotkey span, .limit-hotkey span, .buy-hotkey span, .sell-hotkey span {
         margin-left: 0.5em;
         font-size: 0.8em;
         padding: 0.1em 0.4em;
@@ -72,19 +72,27 @@
             if (btn) setTimeout(() => { btn.click(); setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 100); }, 0);
         }
         if (tab === 'twap') {
-            // TWAP is inside the Advanced dropdown — click dropdown first, then TWAP option
+            // TWAP is inside the Advanced dropdown
+            // Step 1: Click the dropdown trigger to open it
             const advancedBtn = document.querySelector('[data-testid="select-order-type-advanced"]') ||
                 Array.from(document.querySelectorAll('button')).find(b => /advanced/i.test(b.textContent));
             if (advancedBtn) {
                 advancedBtn.click();
-                setTimeout(() => {
-                    const twapOption = document.querySelector('[data-testid="select-order-type-twap"]') ||
-                        Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], button, div[class*="menu"] div, div[class*="dropdown"] div')).find(el => /twap/i.test(el.textContent));
-                    if (twapOption) {
-                        twapOption.click();
-                        setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 100);
+                // Step 2: Wait for dropdown to render, then find TWAP and click it
+                const findAndClickTwap = (retries = 10) => {
+                    // Search broadly for TWAP option in any dropdown/popover/menu
+                    const candidates = document.querySelectorAll('[role="menuitem"], [role="option"], [data-testid*="twap"], [data-testid*="TWAP"], li, a, button, div, span');
+                    for (const el of candidates) {
+                        const text = (el.textContent || "").trim();
+                        if (/^twap$/i.test(text) || el.getAttribute?.("data-testid")?.toLowerCase().includes("twap")) {
+                            el.click();
+                            setTimeout(() => { focusAmountInput(); attachEnterForOrder(); }, 150);
+                            return;
+                        }
                     }
-                }, 150);
+                    if (retries > 0) setTimeout(() => findAndClickTwap(retries - 1), 50);
+                };
+                setTimeout(() => findAndClickTwap(), 100);
             }
         }
     }
@@ -128,22 +136,6 @@
                     span.className = 'limit-hotkey';
                     span.innerHTML = ` <span>${keyBadge('L')}</span>`;
                     limitBtn.appendChild(span);
-                }
-            } else if (span) {
-                span.remove();
-            }
-        }
-        // TWAP (Advanced dropdown)
-        const advBtn = document.querySelector('[data-testid="select-order-type-advanced"]') ||
-            Array.from(document.querySelectorAll('button')).find(b => /advanced/i.test(b.textContent));
-        if (advBtn) {
-            let span = advBtn.querySelector('.twap-hotkey');
-            if (show) {
-                if (!span) {
-                    span = document.createElement('span');
-                    span.className = 'twap-hotkey';
-                    span.innerHTML = ` <span>${keyBadge('T')} TWAP</span>`;
-                    advBtn.appendChild(span);
                 }
             } else if (span) {
                 span.remove();

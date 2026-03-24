@@ -337,22 +337,58 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
 
 // ---------- Column resizing & funding injection ----------
 
-// Column width adjustments via CSS
+// Column width adjustments — directly modify inline styles on table headers/cells
 function adjustColumnWidths() {
-    const styleId = "pp-col-widths";
-    if (document.getElementById(styleId)) return;
-    const style = document.createElement("style");
-    style.id = styleId;
-    // Lighter positions table uses nth-child for column sizing
-    // Reduce Size column, expand Funding column
-    style.textContent = `
-        table[data-testid="positions-table"] th:nth-child(3),
-        table[data-testid="positions-table"] td:nth-child(3) {
-            max-width: 70% !important;
-            width: 70% !important;
+    const table = getPositionsTable();
+    if (!table) return;
+
+    // Find header cells to identify column indices
+    const ths = table.querySelectorAll("thead th");
+    let sizeIdx = -1, fundingIdx = -1;
+    ths.forEach((th, i) => {
+        const text = (th.textContent || "").trim().toLowerCase();
+        if (text.includes("size") && sizeIdx < 0) sizeIdx = i;
+        if (text.includes("funding") && fundingIdx < 0) fundingIdx = i;
+    });
+
+    if (sizeIdx < 0 && fundingIdx < 0) return;
+
+    // Adjust header widths
+    function shrinkCol(th) {
+        const w = th.style.width || th.style.minWidth;
+        if (w) {
+            const px = parseFloat(w);
+            if (px > 0) {
+                const newW = Math.round(px * 0.7) + "px";
+                th.style.width = newW;
+                th.style.minWidth = newW;
+                th.style.maxWidth = newW;
+            }
         }
-    `;
-    document.head.appendChild(style);
+    }
+    function growCol(th) {
+        const w = th.style.width || th.style.minWidth;
+        if (w) {
+            const px = parseFloat(w);
+            if (px > 0) {
+                const newW = Math.round(px * 1.3) + "px";
+                th.style.width = newW;
+                th.style.minWidth = newW;
+                th.style.maxWidth = newW;
+            }
+        }
+    }
+
+    if (sizeIdx >= 0 && ths[sizeIdx]) shrinkCol(ths[sizeIdx]);
+    if (fundingIdx >= 0 && ths[fundingIdx]) growCol(ths[fundingIdx]);
+
+    // Apply same to all body rows
+    const rows = table.querySelectorAll("tbody tr");
+    rows.forEach(row => {
+        const tds = row.querySelectorAll("td");
+        if (sizeIdx >= 0 && tds[sizeIdx]) shrinkCol(tds[sizeIdx]);
+        if (fundingIdx >= 0 && tds[fundingIdx]) growCol(tds[fundingIdx]);
+    });
 }
 
 function injectFundingRatesIntoTable(table) {
