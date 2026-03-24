@@ -34,6 +34,141 @@ let observer = null;
 // Persistent mask state (id -> true = masked)
 const maskedRows = {};
 
+// ---------- Risk Constants (fetched from Lighter bundle) ----------
+let _riskConstants = null; // { beta: {market_id: val}, vol: {...}, drift: {...} }
+let _symbolToMarketId = {}; // symbol -> market_id
+let _riskConstantsFetched = false;
+
+// Standard normal CDF approximation (Abramowitz & Stegun)
+function normCDF(x, mean = 0, std = 1) {
+    const z = (x - mean) / std;
+    const a = 1 / (1 + 0.2316419 * Math.abs(z));
+    let s = 0.3989423 * Math.exp(-z * z / 2) * a *
+        (0.3193815 + a * (-0.3565638 + a * (1.781478 + a * (-1.821256 + a * 1.330274))));
+    if (z > 0) s = 1 - s;
+    return s;
+}
+
+// Per-position liquidation probability
+function positionLiqProb(sign, markPrice, liqPrice, volatility, drift) {
+    if (!liqPrice) return 0;
+    const pctToLiq = (liqPrice - markPrice) / (markPrice || 1);
+    let prob = normCDF(pctToLiq, drift, volatility);
+    if (sign < 0) prob = 1 - prob;
+    return prob;
+}
+
+async function fetchRiskConstants() {
+    if (_riskConstantsFetched) return _riskConstants;
+    _riskConstantsFetched = true;
+    try {
+        // Get the bundle URL from the page
+        const scripts = document.querySelectorAll('script[src*="/assets/index-"]');
+        let bundleUrl = null;
+        for (const s of scripts) {
+            if (s.src.includes('/assets/index-')) { bundleUrl = s.src; break; }
+        }
+        if (!bundleUrl) {
+            // Fallback: fetch the HTML and find it
+            const html = await (await fetch(location.origin)).text();
+            const m = html.match(/src="(\/assets\/index-[^"]+\.js)"/);
+            if (m) bundleUrl = location.origin + m[1];
+        }
+        if (!bundleUrl) { console.warn("[Perpetualpulse] Could not find bundle URL"); return null; }
+
+        const js = await (await fetch(bundleUrl)).text();
+
+        // Parse constants: kLe (beta), xLe (volatility), wLe (drift)
+        function parseObj(name) {
+            const re = new RegExp(name + '=\\{([^}]+)\\}');
+            const m = js.match(re);
+            if (!m) return {};
+            const obj = {};
+            for (const pair of m[1].split(',')) {
+                const [k, v] = pair.split(':');
+                if (k !== undefined && v !== undefined) {
+                    const nv = Number(v);
+                    obj[Number(k)] = isNaN(nv) ? 1 : nv; // 'mr' defaults resolve to 1
+                }
+            }
+            return obj;
+        }
+
+        _riskConstants = {
+            beta: parseObj('kLe'),
+            vol: parseObj('xLe'),
+            drift: parseObj('wLe'),
+        };
+        console.log("[Perpetualpulse] Risk constants loaded:", Object.keys(_riskConstants.beta).length, "markets");
+    } catch (e) {
+        console.warn("[Perpetualpulse] Failed to fetch risk constants:", e);
+    }
+    return _riskConstants;
+}
+
+async function fetchSymbolToMarketId() {
+    if (Object.keys(_symbolToMarketId).length > 0) return _symbolToMarketId;
+    try {
+        // Use the funding-rates API which has symbol + market_id
+        const resp = await fetch("https://mainnet.zklighter.elliot.ai/api/v1/funding-rates");
+        const data = await resp.json();
+        const rates = data.funding_rates || [];
+        for (const r of rates) {
+            if (r.exchange === "lighter" && r.symbol && r.market_id !== undefined) {
+                _symbolToMarketId[r.symbol.toUpperCase()] = r.market_id;
+            }
+        }
+    } catch (e) {
+        console.warn("[Perpetualpulse] Failed to fetch symbol->market_id mapping:", e);
+    }
+    return _symbolToMarketId;
+}
+
+function computeRiskMetrics(positions, equity) {
+    // positions: [{ symbol, sign (+1/-1), notional, markPrice, liqPrice }]
+    if (!_riskConstants || positions.length === 0 || !equity) return null;
+
+    const DEFAULT_VOL = 0.05;
+    const DEFAULT_DRIFT = 0;
+
+    let totalLong = 0, totalShort = 0;
+    let longBetaSum = 0, shortBetaSum = 0;
+    let varCurrent = 0, varTotal = 0;
+    let survivalProduct = 1;
+
+    for (const p of positions) {
+        const mid = _symbolToMarketId[p.symbol.toUpperCase()];
+        if (mid === undefined) continue;
+
+        const beta = _riskConstants.beta[mid] ?? 1;
+        const vol = _riskConstants.vol[mid] ?? DEFAULT_VOL;
+        const drift = _riskConstants.drift[mid] ?? DEFAULT_DRIFT;
+        const notional = p.notional;
+
+        if (p.sign > 0) {
+            totalLong += notional;
+            longBetaSum += notional * beta;
+        } else {
+            totalShort += notional;
+            shortBetaSum += notional * beta;
+        }
+
+        varCurrent += notional * Math.min(vol * 1.65, 1);
+        varTotal += notional;
+
+        const liqProb = positionLiqProb(p.sign, p.markPrice, p.liqPrice, vol, drift);
+        survivalProduct *= (1 - liqProb);
+    }
+
+    const netPosition = totalLong - totalShort;
+    const netBetaNum = longBetaSum - shortBetaSum;
+    const netBeta = netPosition ? netBetaNum / netPosition : 0;
+    const valueAtRisk = varTotal ? varCurrent / varTotal : 0;
+    const probLiq = 1 - survivalProduct;
+
+    return { netBeta, valueAtRisk, probLiq };
+}
+
 // ---------- Funding Rate Cache ----------
 let _fundingRates = {};  // symbol -> { lighter: rate, binance: rate, ... }
 let _fundingLastFetch = 0;
@@ -451,17 +586,27 @@ async function injectMetrics() {
     const table = getPositionsTable();
     if (!table) return;
 
-    // Fetch funding rates (cached, non-blocking after first load)
-    await fetchFundingRates();
+    // Fetch funding rates + risk constants (cached, non-blocking after first load)
+    await Promise.all([fetchFundingRates(), fetchRiskConstants(), fetchSymbolToMarketId()]);
     adjustColumnWidths();
 
     // Inject funding rates into position rows
     injectFundingRatesIntoTable(table);
 
+    // Find column indices from headers
+    const ths = table.querySelectorAll("thead th");
+    let markPriceIdx = -1, liqPriceIdx = -1;
+    ths.forEach((th, i) => {
+        const text = (th.textContent || "").trim().toLowerCase();
+        if (text.includes("mark")) markPriceIdx = i;
+        if (text.includes("liq")) liqPriceIdx = i;
+    });
+
     let longSum = 0,
         shortSum = 0;
     let longCount = 0,
         shortCount = 0;
+    const riskPositions = []; // for risk metric computation
 
     const rows = table.querySelectorAll("tbody tr[data-testid^='row-']");
     rows.forEach((row) => {
@@ -480,6 +625,20 @@ async function injectMetrics() {
         } else if (isShort) {
             shortSum += value;
             shortCount++;
+        }
+
+        // Collect data for risk metrics
+        if (isLong || isShort) {
+            const symbol = getSymbolFromMarketCell(td0);
+            const markPrice = markPriceIdx >= 0 && tds[markPriceIdx] ? parseUSD(tds[markPriceIdx].innerText) : 0;
+            const liqPrice = liqPriceIdx >= 0 && tds[liqPriceIdx] ? parseUSD(tds[liqPriceIdx].innerText) : 0;
+            riskPositions.push({
+                symbol,
+                sign: isLong ? 1 : -1,
+                notional: value,
+                markPrice,
+                liqPrice,
+            });
         }
     });
 
@@ -506,6 +665,11 @@ async function injectMetrics() {
 
     const fmtDollar = (n) => `$${Math.round(n).toLocaleString()}`;
 
+    // Compute risk metrics
+    const risk = computeRiskMetrics(riskPositions, portVal);
+
+    const fmtPct = (n) => `${(n * 100).toFixed(2)}%`;
+
     const newRows = [
         formatRow(
             "Long vs Short:",
@@ -529,6 +693,18 @@ async function injectMetrics() {
             `${netLeverage.toFixed(2)}x (${fmtDollar(netExposure)})`,
             "ls-line-5"
         ),
+    ];
+
+    // Risk metrics (only show if constants loaded)
+    if (risk) {
+        newRows.push(
+            formatRow("Value at Risk:", fmtPct(risk.valueAtRisk), "ls-line-var", true),
+            formatRow("Net Beta:", risk.netBeta.toFixed(2), "ls-line-beta"),
+            formatRow("Risk of Liq:", fmtPct(risk.probLiq), "ls-line-liq"),
+        );
+    }
+
+    newRows.push(
         formatCopyEquationRow(
             () => {
                 const tableEl = getPositionsTable();
@@ -536,7 +712,7 @@ async function injectMetrics() {
             },
             "ls-line-tv"
         ),
-    ];
+    );
 
     newRows.forEach((row) => container.appendChild(row));
     } finally { _injecting = false; }
