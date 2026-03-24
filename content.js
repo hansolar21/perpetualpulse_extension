@@ -316,8 +316,6 @@ function injectMetrics() {
 
     let longSum = 0,
         shortSum = 0;
-    let longLevs = [],
-        shortLevs = [];
     let longCount = 0,
         shortCount = 0;
 
@@ -334,27 +332,26 @@ function injectMetrics() {
         const isLong = !!td0.querySelector('[data-testid="direction-long"]');
         const isShort = !!td0.querySelector('[data-testid="direction-short"]');
 
-        // NEW: leverage is the "20x"/"50x" span in td0
-        const levTxt = td0.querySelector('span[data-state]')?.textContent || "";
-        const leverage = parseFloat(levTxt.replace(/x/i, "")) || 0;
+        // The visible leverage badge shows MAX leverage (e.g. "50x"), not actual.
+        // Actual leverage = positionValue / equity, calculated below after the loop.
 
         if (isLong) {
             longSum += value;
             longCount++;
-            if (leverage) longLevs.push(leverage);
         } else if (isShort) {
             shortSum += value;
             shortCount++;
-            if (leverage) shortLevs.push(leverage);
         }
     });
 
-    const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
     const portVal = safePortfolioValue();
 
-    // Avoid divide-by-zero; show 0 only if we truly have 0 exposure
     const longPVx = portVal ? longSum / portVal : 0;
     const shortPVx = portVal ? shortSum / portVal : 0;
+
+    // Average leverage per pair = total side exposure / (equity × count)
+    const avgLongLev = portVal && longCount ? longSum / portVal / longCount : 0;
+    const avgShortLev = portVal && shortCount ? shortSum / portVal / shortCount : 0;
 
     const total = longSum + shortSum;
     const longRatio = total > 0 ? (longSum / total).toFixed(2) : "0.00";
@@ -384,12 +381,12 @@ function injectMetrics() {
         formatRow("L/S Ratio:", `${lsRatio} (Longs = ${longRatio})`, "ls-line-2"),
         formatRow(
             "Long vs Portfolio:",
-            `${longPVx.toFixed(2)}x (${longCount} pairs at ${avg(longLevs).toFixed(1)}x)`,
+            `${longPVx.toFixed(2)}x (${longCount} pairs at ${avgLongLev.toFixed(1)}x avg)`,
             "ls-line-3"
         ),
         formatRow(
             "Short vs Portfolio:",
-            `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`,
+            `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avgShortLev.toFixed(1)}x avg)`,
             "ls-line-4"
         ),
         formatRow(

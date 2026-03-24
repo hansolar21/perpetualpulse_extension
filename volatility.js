@@ -355,7 +355,6 @@ function injectMetrics() {
     if (!table) return;
 
     let longSum = 0, shortSum = 0;
-    let longLevs = [], shortLevs = [];
     let longCount = 0, shortCount = 0;
 
     const rows = table.querySelectorAll("tbody tr");
@@ -367,22 +366,20 @@ function injectMetrics() {
         const value = parseUSD(tds[2].innerText);
         const isLong = marketText.includes("\nlong");
         const isShort = marketText.includes("\nshort");
-        const levMatch = marketText.match(/(\d+(\.\d+)?)x/);
-        const leverage = levMatch ? parseFloat(levMatch[1]) : 0;
-
         if (isLong) {
             longSum += value; longCount++;
-            if (leverage) longLevs.push(leverage);
         } else if (isShort) {
             shortSum += value; shortCount++;
-            if (leverage) shortLevs.push(leverage);
         }
     });
 
-    const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
     const portVal = getPortfolioValue();
     const longPVx = portVal ? longSum / portVal : 0;
     const shortPVx = portVal ? shortSum / portVal : 0;
+
+    // Average leverage per pair = total side exposure / (equity × count)
+    const avgLongLev = portVal && longCount ? longSum / portVal / longCount : 0;
+    const avgShortLev = portVal && shortCount ? shortSum / portVal / shortCount : 0;
 
     const total = longSum + shortSum;
     const longRatio = total > 0 ? (longSum / total).toFixed(2) : "0.00";
@@ -398,8 +395,8 @@ function injectMetrics() {
     const newRows = [
         formatRow("Long vs Short:", `$${longSum.toLocaleString()} / $${shortSum.toLocaleString()}`, "ls-line-1", true),
         formatRow("L/S Ratio:", `${lsRatio} (Longs = ${longRatio})`, "ls-line-2"),
-        formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs at ${avg(longLevs).toFixed(1)}x)`, "ls-line-3"),
-        formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avg(shortLevs).toFixed(1)}x)`, "ls-line-4"),
+        formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs at ${avgLongLev.toFixed(1)}x avg)`, "ls-line-3"),
+        formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avgShortLev.toFixed(1)}x avg)`, "ls-line-4"),
         formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x ($${netExposure.toLocaleString()})`, "ls-line-5"),
         formatCopyEquationRow(
             // onCopyClick (copies to clipboard)
