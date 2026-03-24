@@ -71,9 +71,9 @@ function getFundingRate(symbol) {
 
 function formatFundingRate(rate) {
     if (rate === null || rate === undefined) return "";
-    const bps = rate * 10000; // basis points
-    const sign = bps >= 0 ? "+" : "";
-    return `${sign}${bps.toFixed(1)}bp`;
+    const pct = (rate * 100).toFixed(4);
+    const sign = rate >= 0 ? "+" : "";
+    return `${sign}${pct}%`;
 }
 
 // ---------- Utils ----------
@@ -337,8 +337,44 @@ async function copyTradingViewEquationFromTable(table, weightDecimals = 4) {
 
 // ---------- Column resizing & funding injection ----------
 
-// Column width adjustments removed — Lighter virtualizes columns with fixed widths
-// that get compounded on re-injection. Funding rate shown inline is compact enough.
+// Column width adjustments — modify inline width on flex-based th/td
+// Size: 120px -> 90px, Funding: 70px -> 100px (net zero change)
+const COL_WIDTHS = { "size": "90px", "funding": "100px" };
+
+function adjustColumnWidths() {
+    const table = getPositionsTable();
+    if (!table) return;
+
+    const ths = table.querySelectorAll("thead th");
+    const colMap = {}; // header text -> index
+    ths.forEach((th, i) => {
+        const text = (th.textContent || "").trim().toLowerCase();
+        if (text.startsWith("size")) colMap["size"] = i;
+        if (text.startsWith("funding")) colMap["funding"] = i;
+    });
+
+    function setWidth(el, w) {
+        if (!el) return;
+        el.style.width = w;
+        el.style.minWidth = w;
+    }
+
+    // Apply to headers
+    for (const [col, w] of Object.entries(COL_WIDTHS)) {
+        const idx = colMap[col];
+        if (idx !== undefined && ths[idx]) setWidth(ths[idx], w);
+    }
+
+    // Apply to all body rows
+    const rows = table.querySelectorAll("tbody tr");
+    rows.forEach(row => {
+        const tds = row.querySelectorAll("td");
+        for (const [col, w] of Object.entries(COL_WIDTHS)) {
+            const idx = colMap[col];
+            if (idx !== undefined && tds[idx]) setWidth(tds[idx], w);
+        }
+    });
+}
 
 function injectFundingRatesIntoTable(table) {
     if (!table) return;
@@ -392,8 +428,9 @@ function injectFundingRatesIntoTable(table) {
             const rateEl = document.createElement("span");
             rateEl.setAttribute("data-pp-funding", "1");
             rateEl.style.color = rate >= 0 ? "rgba(130, 255, 170, 0.9)" : "rgba(255, 130, 130, 0.9)";
-            rateEl.style.fontSize = "9px";
-            rateEl.style.marginRight = "3px";
+            rateEl.style.fontSize = "inherit";
+            rateEl.style.fontFamily = "inherit";
+            rateEl.style.marginRight = "4px";
             rateEl.style.whiteSpace = "nowrap";
             rateEl.textContent = formatFundingRate(rate);
 
@@ -416,6 +453,7 @@ async function injectMetrics() {
 
     // Fetch funding rates (cached, non-blocking after first load)
     await fetchFundingRates();
+    adjustColumnWidths();
 
     // Inject funding rates into position rows
     injectFundingRatesIntoTable(table);
