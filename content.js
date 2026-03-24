@@ -699,7 +699,7 @@ async function injectMetrics() {
     if (risk) {
         newRows.push(
             formatRow("Value at Risk:", fmtPct(risk.valueAtRisk), "ls-line-var"),
-            formatRow("Net Beta:", risk.netBeta.toFixed(2), "ls-line-beta"),
+            formatRow("Net Beta:", fmtPct(risk.netBeta), "ls-line-beta"),
             formatRow("Risk of Liq:", fmtPct(risk.probLiq), "ls-line-liq"),
         );
     }
