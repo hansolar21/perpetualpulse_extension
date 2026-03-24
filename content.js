@@ -44,7 +44,7 @@ async function fetchFundingRates() {
         return _fundingRates;
     }
     try {
-        const resp = await fetch("https://mainnet.zklighter.elliot.ai/api/v1/fundingRates");
+        const resp = await fetch("https://mainnet.zklighter.elliot.ai/api/v1/funding-rates");
         const data = await resp.json();
         const rates = data.funding_rates || data.fundingRates || [];
         const newRates = {};
@@ -110,7 +110,7 @@ function formatRow(label, value, id = "", isFirst = false) {
 
     const valueSpan = document.createElement("span");
     valueSpan.className = "text-xs";
-    valueSpan.style.color = EXT_COLOR;
+    valueSpan.style.cssText = `color: ${EXT_COLOR} !important;`;
     valueSpan.setAttribute("data-real", value);
 
     const isMasked = !!maskedRows[id];
@@ -404,8 +404,10 @@ function injectFundingRatesIntoTable(table) {
 
 // ---------- Core injection ----------
 async function injectMetrics() {
+    _injecting = true;
+    try {
     const container = document.querySelector('div.flex.flex-col.gap-1\\.5.overflow-auto');
-    if (!container) return;
+    if (!container) { _injecting = false; return; }
     container.querySelectorAll('[data-injected="ls-info"]').forEach((el) => el.remove());
 
     const table = getPositionsTable();
@@ -498,28 +500,19 @@ async function injectMetrics() {
     ];
 
     newRows.forEach((row) => container.appendChild(row));
+    } finally { _injecting = false; }
 }
 
 let _injectPending = false;
+let _injecting = false; // guard to ignore mutations we cause
 function observeTable(table) {
     if (observer) {
         observer.disconnect();
         observer = null;
     }
     observer = new MutationObserver((mutations) => {
-        // Skip mutations caused by our own injections
-        const isOwnMutation = mutations.every(m => {
-            if (m.type === "childList") {
-                for (const node of m.addedNodes) {
-                    if (node.nodeType === 1 && (node.getAttribute?.("data-pp-funding") || node.getAttribute?.("data-injected"))) return true;
-                }
-                for (const node of m.removedNodes) {
-                    if (node.nodeType === 1 && (node.getAttribute?.("data-pp-funding") || node.getAttribute?.("data-injected"))) return true;
-                }
-            }
-            return false;
-        });
-        if (isOwnMutation) return;
+        // Skip all mutations while we're actively injecting
+        if (_injecting) return;
 
         // Debounce to prevent rapid re-fires
         if (!_injectPending) {
