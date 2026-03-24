@@ -395,8 +395,8 @@ function injectMetrics() {
     const newRows = [
         formatRow("Long vs Short:", `$${longSum.toLocaleString()} / $${shortSum.toLocaleString()}`, "ls-line-1", true),
         formatRow("L/S Ratio:", `${lsRatio} (Longs = ${longRatio})`, "ls-line-2"),
-        formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs at ${avgLongLev.toFixed(1)}x avg)`, "ls-line-3"),
-        formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs at ${avgShortLev.toFixed(1)}x avg)`, "ls-line-4"),
+        formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs)`, "ls-line-3"),
+        formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs)`, "ls-line-4"),
         formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x ($${netExposure.toLocaleString()})`, "ls-line-5"),
         formatCopyEquationRow(
             // onCopyClick (copies to clipboard)
