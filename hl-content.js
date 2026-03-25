@@ -169,7 +169,7 @@
         row.onmouseenter = () => { labelSpan.style.color = "rgb(212, 68, 77)"; };
         row.onmouseleave = () => { labelSpan.style.color = EXT_COLOR_DIM; };
 
-        row.onclick = async (e) => {
+        const handler = async (e) => {
             console.log("[Perpetualpulse] TV equation clicked");
             e.stopPropagation();
             e.preventDefault();
@@ -184,6 +184,9 @@
                 setTimeout(() => (labelSpan.innerText = "📋 Copy TradingView equation"), 1500);
             }
         };
+        row.addEventListener("click", handler, true);
+        labelSpan.addEventListener("click", handler, true);
+        row.addEventListener("mousedown", (e) => { console.log("[Perpetualpulse] HL TV row mousedown"); });
 
         return row;
     }
