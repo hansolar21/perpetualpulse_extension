@@ -366,6 +366,30 @@
         });
         // Also tighten the container itself if it has gap
         if (container.style.gap) container.style.gap = "4px";
+
+        // Flatten Deposit / Perps→Spot / Withdraw onto one line
+        const buttons = container.querySelectorAll('button[class*="ftTHYK"]');
+        let depositBtn = null;
+        for (const b of buttons) {
+            if (/^Deposit$/i.test(b.textContent.trim())) { depositBtn = b; break; }
+        }
+        if (depositBtn) {
+            const btnCol = depositBtn.parentElement;
+            if (btnCol && /flex-direction:\s*column/.test(btnCol.getAttribute("style") || "")) {
+                // Make the column into a single row
+                btnCol.style.flexDirection = "row";
+                btnCol.style.gap = "4px";
+                // The Deposit button should share space equally
+                depositBtn.style.flex = "1";
+                depositBtn.style.minWidth = "0";
+                // The grid sub-container (Perps→Spot + Withdraw) should also flex
+                const gridDiv = btnCol.querySelector('div[style*="grid-template-columns"]');
+                if (gridDiv) {
+                    gridDiv.style.flex = "2";
+                    gridDiv.style.gap = "4px";
+                }
+            }
+        }
     }
 
     // ---------- Init ----------
