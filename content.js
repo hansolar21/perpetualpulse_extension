@@ -408,12 +408,10 @@ function formatCopyEquationRow(onClick, id = "") {
             setTimeout(() => (labelSpan.innerText = prev), 1500);
         }
     };
-    row.addEventListener("click", handler, true);
-    leftWrap.addEventListener("click", handler, true);
-    labelSpan.addEventListener("click", handler, true);
-    icon.addEventListener("click", handler, true);
-    // Fallback: mousedown as backup
-    row.addEventListener("mousedown", (e) => { console.log("[Perpetualpulse] TV row mousedown"); });
+    row.addEventListener("mousedown", handler, true);
+    leftWrap.addEventListener("mousedown", handler, true);
+    labelSpan.addEventListener("mousedown", handler, true);
+    icon.addEventListener("mousedown", handler, true);
 
     row.appendChild(leftWrap);
     return row;

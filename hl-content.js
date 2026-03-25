@@ -184,9 +184,8 @@
                 setTimeout(() => (labelSpan.innerText = "📋 Copy TradingView equation"), 1500);
             }
         };
-        row.addEventListener("click", handler, true);
-        labelSpan.addEventListener("click", handler, true);
-        row.addEventListener("mousedown", (e) => { console.log("[Perpetualpulse] HL TV row mousedown"); });
+        row.addEventListener("mousedown", handler, true);
+        labelSpan.addEventListener("mousedown", handler, true);
 
         return row;
     }
