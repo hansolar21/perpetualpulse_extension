@@ -156,51 +156,35 @@
 
     function formatCopyEquationRow(onClick, id = "") {
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;line-height:1.2;padding:1px 0;";
+        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;line-height:1.2;padding:1px 0;cursor:pointer;user-select:none;position:relative;z-index:10;";
         row.setAttribute("data-injected", "pp-hl");
         if (id) row.setAttribute("data-injected-id", id);
 
-        const leftWrap = document.createElement("div");
-        leftWrap.style.cssText = "display:flex;align-items:center;gap:6px;";
-
-        const icon = document.createElement("span");
-        icon.innerText = "📋";
-        icon.style.fontSize = "12px";
-
         const labelSpan = document.createElement("span");
         labelSpan.style.cssText = `font-size:12px;color:${EXT_COLOR_DIM};text-decoration:underline;cursor:pointer;`;
-        labelSpan.innerText = "Copy TradingView equation";
+        labelSpan.innerText = "📋 Copy TradingView equation";
 
-        const info = createInfoIcon("Paste into TradingView to see a consolidated chart of your positions. Top 10 by notional, weighted by exposure. Crypto uses BINANCE perps, equities use their native exchange.");
+        row.appendChild(labelSpan);
 
-        leftWrap.appendChild(icon);
-        leftWrap.appendChild(labelSpan);
-        leftWrap.appendChild(info);
+        row.onmouseenter = () => { labelSpan.style.color = "rgb(212, 68, 77)"; };
+        row.onmouseleave = () => { labelSpan.style.color = EXT_COLOR_DIM; };
 
-        row.style.cursor = "pointer";
-        row.style.userSelect = "none";
-
-        const hoverColor = "rgb(212, 68, 77)";
-        row.addEventListener("mouseenter", () => { labelSpan.style.color = hoverColor; });
-        row.addEventListener("mouseleave", () => { labelSpan.style.color = EXT_COLOR_DIM; });
-
-        const handler = async (e) => {
+        row.onclick = async (e) => {
+            console.log("[Perpetualpulse] TV equation clicked");
             e.stopPropagation();
+            e.preventDefault();
             try {
                 const eq = await onClick();
-                const prev = labelSpan.innerText;
+                console.log("[Perpetualpulse] TV equation result:", eq);
                 labelSpan.innerText = eq || "Copied!";
-                setTimeout(() => (labelSpan.innerText = prev), 2500);
+                setTimeout(() => (labelSpan.innerText = "📋 Copy TradingView equation"), 2500);
             } catch (err) {
                 console.error("[Perpetualpulse] Copy TV equation failed:", err);
-                const prev = labelSpan.innerText;
                 labelSpan.innerText = "Error";
-                setTimeout(() => (labelSpan.innerText = prev), 1500);
+                setTimeout(() => (labelSpan.innerText = "📋 Copy TradingView equation"), 1500);
             }
         };
-        row.addEventListener("click", handler);
 
-        row.appendChild(leftWrap);
         return row;
     }
 
