@@ -243,6 +243,9 @@
             const table = cfg.getPositionsTable();
             if (!table) return;
 
+            // Tighten native spacing
+            tightenAccountSpacing();
+
             // Inject funding rates
             injectFundingRates(table);
 
@@ -350,6 +353,19 @@
             }
         });
         obs.observe(container, { childList: true, subtree: true, characterData: true });
+    }
+
+    // ---------- Tighten native Account Equity / Perps Overview spacing ----------
+    function tightenAccountSpacing() {
+        const container = cfg.getAccountContainer();
+        if (!container) return;
+        // Target all flex-col and grid containers with gap:10px inside the account panel
+        const children = container.querySelectorAll('div[style*="gap: 10px"], div[style*="gap:10px"]');
+        children.forEach((el) => {
+            el.style.gap = "4px";
+        });
+        // Also tighten the container itself if it has gap
+        if (container.style.gap) container.style.gap = "4px";
     }
 
     // ---------- Init ----------
