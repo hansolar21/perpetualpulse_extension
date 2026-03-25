@@ -154,9 +154,11 @@
         return equation;
     }
 
-    function formatCopyEquationRow(onClick, id = "") {
+    function formatCopyEquationRow(onClick, id = "", addSeparator = false) {
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;line-height:1.2;padding:1px 0;cursor:pointer;user-select:none;position:relative;z-index:10;";
+        let css = "display:flex;width:100%;align-items:center;justify-content:space-between;line-height:1.2;padding:1px 0;cursor:pointer;user-select:none;position:relative;z-index:10;";
+        if (addSeparator) css += "border-top:1px solid rgba(130,170,255,0.15);padding-top:4px;margin-top:4px;";
+        row.style.cssText = css;
         row.setAttribute("data-injected", "pp-hl");
         if (id) row.setAttribute("data-injected-id", id);
 
@@ -415,7 +417,7 @@
                 formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs)`, "hl-ls-3"),
                 formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs)`, "hl-ls-4"),
                 formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x (${fmtDollar(netExposure)})`, "hl-ls-5"),
-                formatCopyEquationRow(() => copyTradingViewEquation(cfg.getPositionsTable(), 4), "hl-ls-tv"),
+                formatCopyEquationRow(() => copyTradingViewEquation(cfg.getPositionsTable(), 4), "hl-ls-tv", true),
             ];
 
             // Wrap in a tight container to control spacing
