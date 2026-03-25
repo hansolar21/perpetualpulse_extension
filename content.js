@@ -387,12 +387,11 @@ function formatCopyEquationRow(onClick, id = "") {
     row.style.cursor = "pointer";
     row.style.userSelect = "none";
 
-    const hoverColor = "rgb(212, 68, 77)";
     row.addEventListener("mouseenter", () => {
-        labelSpan.style.color = hoverColor;
+        labelSpan.style.opacity = "0.8";
     });
     row.addEventListener("mouseleave", () => {
-        labelSpan.style.color = EXT_COLOR_DIM;
+        labelSpan.style.opacity = "1";
     });
 
     const handler = (e) => {

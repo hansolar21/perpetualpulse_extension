@@ -167,8 +167,8 @@
 
         row.appendChild(labelSpan);
 
-        row.onmouseenter = () => { labelSpan.style.color = "rgb(212, 68, 77)"; };
-        row.onmouseleave = () => { labelSpan.style.color = EXT_COLOR_DIM; };
+        row.onmouseenter = () => { labelSpan.style.opacity = "0.8"; };
+        row.onmouseleave = () => { labelSpan.style.opacity = "1"; };
 
         const handler = (e) => {
             e.stopPropagation();
