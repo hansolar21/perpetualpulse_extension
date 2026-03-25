@@ -170,7 +170,10 @@
         row.onmouseenter = () => { labelSpan.style.opacity = "0.8"; };
         row.onmouseleave = () => { labelSpan.style.opacity = "1"; };
 
-        const handler = (e) => {
+        const rowId = "pp-tv-eq-" + Math.random().toString(36).slice(2, 8);
+        row.setAttribute("data-pp-tv", rowId);
+        document.addEventListener("pointerdown", (e) => {
+            if (!e.target.closest(`[data-pp-tv="${rowId}"]`)) return;
             e.stopPropagation();
             e.preventDefault();
             _feedbackUntil = Date.now() + 2100;
@@ -180,9 +183,7 @@
             }).catch((err) => {
                 console.error("[Perpetualpulse] Copy TV equation failed:", err);
             });
-        };
-        row.addEventListener("mousedown", handler, true);
-        labelSpan.addEventListener("mousedown", handler, true);
+        }, true);
 
         return row;
     }
