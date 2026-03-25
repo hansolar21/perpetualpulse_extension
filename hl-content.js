@@ -234,7 +234,7 @@
         const isMasked = !!maskedRows[id];
         applyMask(valueSpan, value, isMasked);
         valueSpan.style.cursor = "pointer";
-        valueSpan.addEventListener("click", (e) => {
+        valueSpan.addEventListener("mousedown", (e) => {
             maskedRows[id] = !(valueSpan.getAttribute("data-masked") === "1");
             applyMask(valueSpan, value, maskedRows[id]);
             e.stopPropagation();

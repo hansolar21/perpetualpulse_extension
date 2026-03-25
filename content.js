@@ -295,7 +295,7 @@ function createInfoIcon(tooltipText) {
     info.innerText = "ⓘ";
     info.title = tooltipText;
     info.style.cssText = `cursor:help;font-size:11px;opacity:0.6;color:${EXT_COLOR_DIM};margin-left:3px;`;
-    info.addEventListener("click", (e) => { e.stopPropagation(); });
+    info.addEventListener("mousedown", (e) => { e.stopPropagation(); });
     return info;
 }
 
@@ -340,7 +340,7 @@ function formatRow(label, value, id = "", isFirst = false, tooltip = null) {
     applyMask(valueSpan, value, isMasked);
 
     valueSpan.style.cursor = "pointer";
-    valueSpan.addEventListener("click", function (e) {
+    valueSpan.addEventListener("mousedown", function (e) {
         maskedRows[id] = !(valueSpan.getAttribute("data-masked") === "1");
         applyMask(valueSpan, value, maskedRows[id]);
         e.stopPropagation();
