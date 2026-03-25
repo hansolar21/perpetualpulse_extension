@@ -78,6 +78,129 @@
         return parseFloat((str || "").replace(/[\s\u00A0,$%xUSDH]/gi, "")) || 0;
     }
 
+    // ---------- TradingView Equation ----------
+    // Map HL symbol to TradingView ticker
+    // Standard crypto perps → BINANCE:BTCUSDT etc.
+    // xyz equities (NVDA, TSLA) → NASDAQ:NVDA etc.
+    // vntl pre-launch → no reliable TV ticker, use HYPERLIQUID:symbol
+    const _tvExchangeMap = {
+        // Known equity tickers on xyz dex
+        NVDA: "NASDAQ:NVDA", TSLA: "NASDAQ:TSLA", AAPL: "NASDAQ:AAPL", AMZN: "NASDAQ:AMZN",
+        GOOG: "NASDAQ:GOOG", GOOGL: "NASDAQ:GOOGL", META: "NASDAQ:META", MSFT: "NASDAQ:MSFT",
+        NFLX: "NASDAQ:NFLX", AMD: "NASDAQ:AMD", INTC: "NASDAQ:INTC", COIN: "NASDAQ:COIN",
+        HOOD: "NASDAQ:HOOD", MSTR: "NASDAQ:NASDAQ:MSTR", PLTR: "NYSE:PLTR",
+        GOLD: "TVC:GOLD", SILVER: "TVC:SILVER",
+        SPY: "AMEX:SPY", QQQ: "NASDAQ:QQQ",
+        EWY: "AMEX:EWY",
+        // Korean equities
+        SAMSUNG: "KRX:005930", SKHYNIX: "KRX:000660", HYUNDAI: "KRX:005380",
+    };
+
+    function hlSymbolToTV(symbol) {
+        const sym = (symbol || "").toUpperCase();
+        if (_tvExchangeMap[sym]) return _tvExchangeMap[sym];
+        // Default crypto: use BINANCE perpetuals
+        return `BINANCE:${sym}USDT.P`;
+    }
+
+    async function copyTradingViewEquation(table, weightDecimals = 4) {
+        if (!table) throw new Error("No table");
+
+        const positions = [];
+        const allRows = table.querySelectorAll("tr");
+        allRows.forEach((row, rowIdx) => {
+            if (rowIdx === 0) return;
+            const tds = row.querySelectorAll("td");
+            if (tds.length < 3) return;
+
+            const td0 = tds[0];
+            const sym = cfg.getSymbolFromCell(td0);
+            if (!sym || /Coin/i.test(sym)) return;
+
+            const isLong = cfg.isLongRow(td0);
+            const isShort = cfg.isShortRow(td0);
+            if (!isLong && !isShort) return;
+
+            const notional = Math.abs(parseUSD(tds[2].textContent));
+            if (!(notional > 0)) return;
+
+            positions.push({
+                symbol: hlSymbolToTV(sym),
+                side: isShort ? "Short" : "Long",
+                notional,
+            });
+        });
+
+        if (positions.length === 0) {
+            await navigator.clipboard.writeText("");
+            return "";
+        }
+
+        const top = positions.sort((a, b) => b.notional - a.notional).slice(0, 10);
+        const sumAbs = top.reduce((s, p) => s + Math.abs(p.notional), 0) || 1;
+
+        const terms = top.map((p) => {
+            const w = p.notional / sumAbs;
+            const exp = (p.side === "Short" ? -w : w).toFixed(weightDecimals);
+            return `${p.symbol}^${exp}`;
+        });
+
+        const equation = terms.join("*");
+        await navigator.clipboard.writeText(equation);
+        console.log("[Perpetualpulse] Copied TradingView equation:", equation);
+        return equation;
+    }
+
+    function formatCopyEquationRow(onClick, id = "") {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;line-height:1.2;padding:1px 0;";
+        row.setAttribute("data-injected", "pp-hl");
+        if (id) row.setAttribute("data-injected-id", id);
+
+        const leftWrap = document.createElement("div");
+        leftWrap.style.cssText = "display:flex;align-items:center;gap:6px;";
+
+        const icon = document.createElement("span");
+        icon.innerText = "📋";
+        icon.style.fontSize = "12px";
+
+        const labelSpan = document.createElement("span");
+        labelSpan.style.cssText = `font-size:12px;color:${EXT_COLOR_DIM};text-decoration:underline;cursor:pointer;`;
+        labelSpan.innerText = "Copy TradingView equation";
+
+        const info = createInfoIcon("Paste into TradingView to see a consolidated chart of your positions. Top 10 by notional, weighted by exposure. Crypto uses BINANCE perps, equities use their native exchange.");
+
+        leftWrap.appendChild(icon);
+        leftWrap.appendChild(labelSpan);
+        leftWrap.appendChild(info);
+
+        row.style.cursor = "pointer";
+        row.style.userSelect = "none";
+
+        const hoverColor = "rgb(212, 68, 77)";
+        row.addEventListener("mouseenter", () => { labelSpan.style.color = hoverColor; });
+        row.addEventListener("mouseleave", () => { labelSpan.style.color = EXT_COLOR_DIM; });
+
+        const handler = async (e) => {
+            e.stopPropagation();
+            try {
+                const eq = await onClick();
+                const prev = labelSpan.innerText;
+                labelSpan.innerText = eq || "Copied!";
+                setTimeout(() => (labelSpan.innerText = prev), 2500);
+            } catch (err) {
+                console.error("[Perpetualpulse] Copy TV equation failed:", err);
+                const prev = labelSpan.innerText;
+                labelSpan.innerText = "Error";
+                setTimeout(() => (labelSpan.innerText = prev), 1500);
+            }
+        };
+        row.addEventListener("click", handler);
+
+        row.appendChild(leftWrap);
+        return row;
+    }
+
     // Persistent mask state
     const maskedRows = {};
 
@@ -303,6 +426,7 @@
                 formatRow("Long vs Portfolio:", `${longPVx.toFixed(2)}x (${longCount} pairs)`, "hl-ls-3"),
                 formatRow("Short vs Portfolio:", `${shortPVx.toFixed(2)}x (${shortCount} pairs)`, "hl-ls-4"),
                 formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x (${fmtDollar(netExposure)})`, "hl-ls-5"),
+                formatCopyEquationRow(() => copyTradingViewEquation(cfg.getPositionsTable(), 4), "hl-ls-tv"),
             ];
 
             // Wrap in a tight container to control spacing
