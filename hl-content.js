@@ -366,27 +366,38 @@
         if (container.style.gap) container.style.gap = "4px";
 
         // Flatten Deposit / Perps→Spot / Withdraw onto one line
-        const buttons = container.querySelectorAll('button[class*="ftTHYK"]');
-        let depositBtn = null;
-        for (const b of buttons) {
-            if (/^Deposit$/i.test(b.textContent.trim())) { depositBtn = b; break; }
-        }
-        if (depositBtn) {
-            const btnCol = depositBtn.parentElement;
-            if (btnCol && /flex-direction:\s*column/.test(btnCol.getAttribute("style") || "")) {
-                // Make the column into a single row
-                btnCol.style.flexDirection = "row";
-                btnCol.style.gap = "4px";
-                // The Deposit button should share space equally
-                depositBtn.style.flex = "1";
-                depositBtn.style.minWidth = "0";
-                // The grid sub-container (Perps→Spot + Withdraw) should also flex
-                const gridDiv = btnCol.querySelector('div[style*="grid-template-columns"]');
-                if (gridDiv) {
-                    gridDiv.style.flex = "2";
-                    gridDiv.style.gap = "4px";
-                }
+        // Search the entire page for the Deposit button near the account panel
+        const allButtons = document.querySelectorAll('button');
+        for (const b of allButtons) {
+            if (b.textContent.trim() !== "Deposit") continue;
+            // Skip the top nav deposit button (it has a fixed width parent)
+            const parentStyle = b.parentElement?.getAttribute("style") || "";
+            if (parentStyle.includes("width: 100px")) continue;
+            
+            const btnCol = b.parentElement;
+            if (!btnCol) continue;
+            const colStyle = btnCol.getAttribute("style") || "";
+            if (!colStyle.includes("flex-direction") || !colStyle.includes("column")) continue;
+
+            // Found it — restyle to row
+            btnCol.style.flexDirection = "row";
+            btnCol.style.gap = "4px";
+            btnCol.style.alignItems = "stretch";
+            b.style.flex = "1";
+            b.style.minWidth = "0";
+            b.style.padding = "4px 0";
+            b.style.fontSize = "11px";
+            const gridDiv = btnCol.querySelector('div[style*="grid-template-columns"]');
+            if (gridDiv) {
+                gridDiv.style.flex = "2";
+                gridDiv.style.gap = "4px";
             }
+            // Shrink the inner buttons too
+            gridDiv?.querySelectorAll("button").forEach((gb) => {
+                gb.style.padding = "4px 0";
+                gb.style.fontSize = "11px";
+            });
+            break;
         }
     }
 
