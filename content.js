@@ -313,16 +313,22 @@ function createInfoIcon(tooltipText) {
     `;
     document.body.appendChild(tip);
 
-    info.addEventListener("mouseenter", (e) => {
+    let _tipTimer = null;
+    const showTip = () => {
+        clearTimeout(_tipTimer);
         const rect = info.getBoundingClientRect();
         tip.style.left = Math.min(rect.left, window.innerWidth - 260) + "px";
         tip.style.top = (rect.bottom + 4) + "px";
         tip.style.opacity = "1";
-    });
-    info.addEventListener("mouseleave", () => {
-        tip.style.opacity = "0";
-    });
-    // Prevent click from bubbling to parent row handlers
+    };
+    const hideTip = () => {
+        _tipTimer = setTimeout(() => { tip.style.opacity = "0"; }, 120);
+    };
+    info.addEventListener("mouseenter", showTip);
+    info.addEventListener("mouseleave", hideTip);
+    tip.addEventListener("mouseenter", showTip);
+    tip.addEventListener("mouseleave", hideTip);
+    tip.style.pointerEvents = "auto";
     info.addEventListener("click", (e) => { e.stopPropagation(); });
     return info;
 }
