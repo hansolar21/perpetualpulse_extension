@@ -155,20 +155,25 @@
             // Positions table — find by header content, not class names
             getPositionsTable: () => {
                 const tables = document.querySelectorAll("table");
+                // Strict: Coin + Size + Entry Price
                 for (const t of tables) {
-                    const firstRow = t.querySelector("tr");
-                    if (!firstRow) continue;
-                    const headerText = firstRow.textContent || "";
-                    // Positions table has Coin + Size + Entry Price headers
-                    if (/\bCoin\b/.test(headerText) && /\bSize\b/.test(headerText) && /\bEntry\b/.test(headerText)) {
+                    const headerText = t.querySelector("thead, tr")?.textContent || "";
+                    if (/\bCoin\b/.test(headerText) && /\bSize\b/.test(headerText) && /Entry/i.test(headerText)) {
                         return t;
                     }
                 }
-                // Looser fallback: any table with Coin header
+                // Medium: Coin + Size
                 for (const t of tables) {
-                    const firstRow = t.querySelector("tr");
-                    if (firstRow && /\bCoin\b/.test(firstRow.textContent || "")) return t;
+                    const headerText = t.querySelector("thead, tr")?.textContent || "";
+                    if (/\bCoin\b/.test(headerText) && /\bSize\b/.test(headerText)) return t;
                 }
+                // Loose: any table with Coin
+                for (const t of tables) {
+                    const txt = t.querySelector("thead, tr")?.textContent || "";
+                    if (/\bCoin\b/.test(txt)) return t;
+                }
+                // Last resort: only table on page
+                if (tables.length === 1) return tables[0];
                 return null;
             },
             isLongRow: (td0) => {
