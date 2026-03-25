@@ -401,6 +401,7 @@ function formatCopyEquationRow(onClick, id = "") {
             await onClick();
             const prevText = labelSpan.innerText;
             const prevColor = labelSpan.style.color;
+            _feedbackUntil = Date.now() + 1600;
             labelSpan.innerText = "✓ Copied to clipboard";
             labelSpan.style.color = "rgba(130, 255, 170, 0.95)";
             setTimeout(() => { labelSpan.innerText = prevText; labelSpan.style.color = prevColor; }, 1500);
@@ -408,6 +409,7 @@ function formatCopyEquationRow(onClick, id = "") {
             console.error("[Perpetualpulse] Copy TV equation failed:", err);
             const prevText = labelSpan.innerText;
             const prevColor = labelSpan.style.color;
+            _feedbackUntil = Date.now() + 1600;
             labelSpan.innerText = "✗ Copy failed";
             labelSpan.style.color = "rgba(255, 130, 130, 0.95)";
             setTimeout(() => { labelSpan.innerText = prevText; labelSpan.style.color = prevColor; }, 1500);
@@ -810,6 +812,7 @@ async function injectMetrics() {
 
 let _injectPending = false;
 let _injecting = false; // guard to ignore mutations we cause
+let _feedbackUntil = 0; // suppress re-injection during copy feedback
 function observeTable(table) {
     if (observer) {
         observer.disconnect();
@@ -817,7 +820,7 @@ function observeTable(table) {
     }
     observer = new MutationObserver((mutations) => {
         // Skip all mutations while we're actively injecting
-        if (_injecting) return;
+        if (_injecting || Date.now() < _feedbackUntil) return;
 
         // Debounce to prevent rapid re-fires
         if (!_injectPending) {

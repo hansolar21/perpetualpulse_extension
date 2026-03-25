@@ -15,6 +15,7 @@
     let observer = null;
     let _injecting = false;
     let _injectPending = false;
+    let _feedbackUntil = 0;
     let lastHref = location.href;
 
     // ---------- Funding Rate Cache ----------
@@ -175,11 +176,13 @@
             try {
                 await onClick();
                 const prevColor = labelSpan.style.color;
+                _feedbackUntil = Date.now() + 1600;
                 labelSpan.innerText = "✓ Copied to clipboard";
                 labelSpan.style.color = "rgba(130, 255, 170, 0.95)";
                 setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; labelSpan.style.color = prevColor; }, 1500);
             } catch (err) {
                 console.error("[Perpetualpulse] Copy TV equation failed:", err);
+                _feedbackUntil = Date.now() + 1600;
                 labelSpan.innerText = "✗ Copy failed";
                 labelSpan.style.color = "rgba(255, 130, 130, 0.95)";
                 setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; labelSpan.style.color = EXT_COLOR_DIM; }, 1500);
@@ -439,7 +442,7 @@
     function observeTable(table) {
         if (observer) { observer.disconnect(); observer = null; }
         observer = new MutationObserver(() => {
-            if (_injecting) return;
+            if (_injecting || Date.now() < _feedbackUntil) return;
             if (!_injectPending) {
                 _injectPending = true;
                 requestAnimationFrame(() => {
@@ -456,7 +459,7 @@
         const container = cfg.getAccountContainer();
         if (!container) return;
         const obs = new MutationObserver(() => {
-            if (_injecting) return;
+            if (_injecting || Date.now() < _feedbackUntil) return;
             if (!_injectPending) {
                 _injectPending = true;
                 requestAnimationFrame(() => {
