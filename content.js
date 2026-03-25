@@ -344,7 +344,8 @@ function formatRow(label, value, id = "", isFirst = false, tooltip = null) {
         maskedRows[id] = !(valueSpan.getAttribute("data-masked") === "1");
         applyMask(valueSpan, value, maskedRows[id]);
         e.stopPropagation();
-    });
+        e.preventDefault();
+    }, true);
 
     labelDiv.appendChild(labelSpan);
     if (tooltip) {

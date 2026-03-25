@@ -238,7 +238,8 @@
             maskedRows[id] = !(valueSpan.getAttribute("data-masked") === "1");
             applyMask(valueSpan, value, maskedRows[id]);
             e.stopPropagation();
-        });
+            e.preventDefault();
+        }, true);
 
         labelDiv.appendChild(labelSpan);
         if (tooltip) labelDiv.appendChild(createInfoIcon(tooltip));
