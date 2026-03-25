@@ -290,13 +290,12 @@ function formatFundingRate(rate) {
 }
 
 // ---------- Info Icon / Tooltip ----------
-// Inject CSS once for tooltip styling
-(function injectTooltipCSS() {
+function _ensureTooltipCSS() {
     if (document.getElementById("pp-tooltip-css")) return;
     const style = document.createElement("style");
     style.id = "pp-tooltip-css";
     style.textContent = `
-        .pp-info { position:relative; cursor:help; font-size:11px; opacity:0.6; margin-left:3px; }
+        .pp-info { position:relative; cursor:help; font-size:11px; opacity:0.6; margin-left:3px; display:inline-block; }
         .pp-info .pp-tip {
             display:none; position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
             width:max-content; max-width:220px; padding:6px 10px; border-radius:4px;
@@ -306,10 +305,11 @@ function formatFundingRate(rate) {
         }
         .pp-info:hover .pp-tip { display:block; }
     `;
-    document.head.appendChild(style);
-})();
+    (document.head || document.documentElement).appendChild(style);
+}
 
 function createInfoIcon(tooltipText) {
+    _ensureTooltipCSS();
     const info = document.createElement("span");
     info.className = "pp-info";
     info.style.color = EXT_COLOR_DIM;
