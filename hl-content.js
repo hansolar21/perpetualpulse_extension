@@ -29,39 +29,28 @@
         try {
             const newRates = {};
 
-            // Fetch both standard perps and vntl (pre-launch/venture) in parallel
-            const [mainResp, vntlResp] = await Promise.all([
-                fetch("https://api.hyperliquid.xyz/info", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ type: "metaAndAssetCtxs" }),
-                }),
-                fetch("https://api.hyperliquid.xyz/info", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ type: "metaAndAssetCtxs", dex: "vntl" }),
-                }),
-            ]);
+            // Fetch standard perps, vntl (pre-launch), and xyz (HIP-3 equities) in parallel
+            const dexes = ["", "vntl", "xyz"];
+            const responses = await Promise.all(
+                dexes.map((dex) =>
+                    fetch("https://api.hyperliquid.xyz/info", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(dex ? { type: "metaAndAssetCtxs", dex } : { type: "metaAndAssetCtxs" }),
+                    }).then((r) => r.json()).catch(() => [{ universe: [] }, []])
+                )
+            );
 
-            // Parse standard perps
-            const mainData = await mainResp.json();
-            const mainUniverse = mainData[0]?.universe || [];
-            const mainCtxs = mainData[1] || [];
-            for (let i = 0; i < mainUniverse.length && i < mainCtxs.length; i++) {
-                const sym = mainUniverse[i].name?.toUpperCase();
-                const rate = parseFloat(mainCtxs[i].funding);
-                if (sym && !isNaN(rate)) newRates[sym] = rate;
-            }
-
-            // Parse vntl assets (names come as "vntl:ANTHROPIC" — strip prefix)
-            const vntlData = await vntlResp.json();
-            const vntlUniverse = vntlData[0]?.universe || [];
-            const vntlCtxs = vntlData[1] || [];
-            for (let i = 0; i < vntlUniverse.length && i < vntlCtxs.length; i++) {
-                let sym = (vntlUniverse[i].name || "").toUpperCase();
-                sym = sym.replace(/^VNTL:/, ""); // strip "vntl:" prefix
-                const rate = parseFloat(vntlCtxs[i].funding);
-                if (sym && !isNaN(rate)) newRates[sym] = rate;
+            for (const data of responses) {
+                const universe = data[0]?.universe || [];
+                const ctxs = data[1] || [];
+                for (let i = 0; i < universe.length && i < ctxs.length; i++) {
+                    let sym = (universe[i].name || "").toUpperCase();
+                    // Strip dex prefix: "vntl:ANTHROPIC" → "ANTHROPIC", "xyz:NVDA" → "NVDA"
+                    sym = sym.replace(/^[A-Z]+:/, "");
+                    const rate = parseFloat(ctxs[i].funding);
+                    if (sym && !isNaN(rate)) newRates[sym] = rate;
+                }
             }
 
             _hlFundingRates = newRates;
@@ -150,22 +139,31 @@
     let _lastGoodEquity = 0;
 
     function getEquity() {
-        // Find "Perps Overview" -> "Balance" row value
-        const divs = document.querySelectorAll("div");
-        for (const d of divs) {
-            const text = (d.textContent || "").trim();
-            if (text === "Balance" || text === "Account Value") {
-                const parent = d.closest("div[style*='justify-content: space-between']");
-                if (parent) {
-                    const valDiv = parent.querySelector("div[style*='text-align: right'], div:last-child");
-                    if (valDiv) {
-                        const v = parseUSD(valDiv.textContent);
-                        if (v > 0) return v;
-                    }
-                }
+        // Strategy: find rows with "justify-content: space-between" that have a label + dollar value
+        // Look for "Balance" label under the Perps Overview section
+        const rows = document.querySelectorAll('div[style*="justify-content: space-between"]');
+        for (const row of rows) {
+            const children = row.children;
+            if (children.length < 2) continue;
+            // Check if first child contains "Balance" text (leaf text, not deep)
+            const labelText = (children[0].textContent || "").trim();
+            if (/^Balance$/i.test(labelText)) {
+                const valText = (children[children.length - 1].textContent || "").trim();
+                const v = parseUSD(valText);
+                if (v > 0) return v;
             }
         }
-        // Fallback: look for the dollar amount after "Perps Overview" -> first value
+        // Fallback: "Account Value" label
+        for (const row of rows) {
+            const children = row.children;
+            if (children.length < 2) continue;
+            const labelText = (children[0].textContent || "").trim();
+            if (/Account Value/i.test(labelText)) {
+                const valText = (children[children.length - 1].textContent || "").trim();
+                const v = parseUSD(valText);
+                if (v > 0) return v;
+            }
+        }
         return 0;
     }
 
