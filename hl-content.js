@@ -530,10 +530,11 @@
         const table = cfg.getPositionsTable();
         const container = cfg.getAccountContainer();
 
-        if (table && container) {
+        if (table || container) {
+            console.log("[Perpetualpulse] HL: init (table=" + !!table + ", container=" + !!container + ")");
             injectMetrics();
-            observeTable(table);
-            observeAccount();
+            if (table) observeTable(table);
+            if (container) observeAccount();
             // Re-fetch funding rates periodically
             setInterval(() => injectMetrics(), 15000);
         } else if (attempt < maxTries) {
@@ -541,6 +542,8 @@
             setTimeout(waitForDomAndData, 500);
         } else {
             console.warn("[Perpetualpulse] HL: DOM not ready after max attempts");
+            // Keep trying slowly
+            setTimeout(waitForDomAndData, 5000);
         }
     }
 

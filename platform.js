@@ -212,19 +212,37 @@
             },
             positionRowSelector: "tbody tr:not(:first-child)",
 
-            // Account section — find smallest container with both "Account Equity" and "Perps Overview"
+            // Account section — walk up from "Perps Overview" to find scrollable container
             getAccountContainer: () => {
+                // Find the "Perps Overview" text node and walk up
                 const all = document.querySelectorAll("div");
-                let best = null;
-                let bestSize = Infinity;
                 for (const d of all) {
-                    const txt = d.textContent || "";
-                    if (/Account Equity/.test(txt) && /Perps Overview/.test(txt)) {
-                        const size = txt.length;
-                        if (size < bestSize) { bestSize = size; best = d; }
+                    // Check direct text content (not deep) to find the label div
+                    const fc = d.firstChild;
+                    if (fc && fc.nodeType === 3 && fc.textContent.trim() === "Perps Overview") {
+                        let parent = d.parentElement;
+                        for (let i = 0; i < 8 && parent; i++) {
+                            const txt = parent.textContent || "";
+                            if (/Account Equity/.test(txt) && /Perps Overview/.test(txt)) {
+                                // Check it has some structure (not the whole page)
+                                if (parent.children.length < 50) return parent;
+                            }
+                            parent = parent.parentElement;
+                        }
+                    }
+                    // Also check innerText match for styled-component rendered text
+                    if (d.children.length === 0 && d.textContent.trim() === "Perps Overview") {
+                        let parent = d.parentElement;
+                        for (let i = 0; i < 8 && parent; i++) {
+                            const txt = parent.textContent || "";
+                            if (/Account Equity/.test(txt) && /Perps Overview/.test(txt) && parent.children.length < 50) {
+                                return parent;
+                            }
+                            parent = parent.parentElement;
+                        }
                     }
                 }
-                return best;
+                return null;
             },
 
             // Funding rates
