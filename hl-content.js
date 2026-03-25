@@ -88,7 +88,7 @@
         NVDA: "NASDAQ:NVDA", TSLA: "NASDAQ:TSLA", AAPL: "NASDAQ:AAPL", AMZN: "NASDAQ:AMZN",
         GOOG: "NASDAQ:GOOG", GOOGL: "NASDAQ:GOOGL", META: "NASDAQ:META", MSFT: "NASDAQ:MSFT",
         NFLX: "NASDAQ:NFLX", AMD: "NASDAQ:AMD", INTC: "NASDAQ:INTC", COIN: "NASDAQ:COIN",
-        HOOD: "NASDAQ:HOOD", MSTR: "NASDAQ:NASDAQ:MSTR", PLTR: "NYSE:PLTR",
+        HOOD: "NASDAQ:HOOD", MSTR: "NASDAQ:MSTR", PLTR: "NYSE:PLTR",
         GOLD: "TVC:GOLD", SILVER: "TVC:SILVER",
         SPY: "AMEX:SPY", QQQ: "NASDAQ:QQQ",
         EWY: "AMEX:EWY",
@@ -105,9 +105,11 @@
 
     async function copyTradingViewEquation(table, weightDecimals = 4) {
         if (!table) throw new Error("No table");
+        console.log("[Perpetualpulse] TV equation: table found, scanning rows...");
 
         const positions = [];
         const allRows = table.querySelectorAll("tr");
+        console.log("[Perpetualpulse] TV equation: found", allRows.length, "rows");
         allRows.forEach((row, rowIdx) => {
             if (rowIdx === 0) return;
             const tds = row.querySelectorAll("td");
@@ -119,9 +121,10 @@
 
             const isLong = cfg.isLongRow(td0);
             const isShort = cfg.isShortRow(td0);
-            if (!isLong && !isShort) return;
-
             const notional = Math.abs(parseUSD(tds[2].textContent));
+            console.log("[Perpetualpulse] TV equation row:", sym, "long=", isLong, "short=", isShort, "notional=", notional);
+
+            if (!isLong && !isShort) return;
             if (!(notional > 0)) return;
 
             positions.push({

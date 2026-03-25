@@ -170,22 +170,27 @@
             },
             isLongRow: (td0) => {
                 // HL indicates direction via left border color: green = long, red = short
+                // Check raw inline style (most reliable) + computed properties
+                const raw = td0.getAttribute("style") || "";
+                if (raw.includes("31, 166, 125")) return true;
                 const bg = td0.style?.background || td0.style?.backgroundImage || "";
                 if (bg.includes("31, 166, 125") || bg.includes("1fa67d")) return true;
-                // Also check size cell color
+                // Also check size cell span color (green text = long)
                 const sizeSpan = td0.nextElementSibling?.querySelector("span");
                 if (sizeSpan) {
-                    const color = sizeSpan.style?.color || "";
+                    const color = (sizeSpan.getAttribute("style") || "") + (sizeSpan.style?.color || "");
                     if (color.includes("31, 166, 125")) return true;
                 }
                 return false;
             },
             isShortRow: (td0) => {
+                const raw = td0.getAttribute("style") || "";
+                if (raw.includes("237, 112, 136")) return true;
                 const bg = td0.style?.background || td0.style?.backgroundImage || "";
                 if (bg.includes("237, 112, 136") || bg.includes("ed7088")) return true;
                 const sizeSpan = td0.nextElementSibling?.querySelector("span");
                 if (sizeSpan) {
-                    const color = sizeSpan.style?.color || "";
+                    const color = (sizeSpan.getAttribute("style") || "") + (sizeSpan.style?.color || "");
                     if (color.includes("237, 112, 136")) return true;
                 }
                 return false;
