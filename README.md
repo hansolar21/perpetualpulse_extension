@@ -6,10 +6,10 @@ A browser extension that injects real-time trading metrics, live funding rates, 
 
 ## Supported Platforms
 
-| Platform | Metrics | Funding Rates | Hotkeys | Risk Metrics |
-|---|---|---|---|---|
-| **Lighter.xyz** | ✅ | ✅ (WebSocket + REST) | ✅ | ✅ (VaR, Beta, Liq) |
-| **Hyperliquid** | ✅ | ✅ (REST — perps, vntl, xyz) | ✅ | ✅ (TV equation) |
+| Platform | Metrics | Funding Rates | Hotkeys | Risk Metrics | TV Equation |
+|---|---|---|---|---|---|
+| **Lighter.xyz** | ✅ | ✅ (WebSocket + REST) | ✅ | ✅ (VaR, Beta, Liq) | ✅ |
+| **Hyperliquid** | ✅ | ✅ (REST — perps, vntl, xyz) | ✅ | — | ✅ |
 
 ## Features
 
@@ -41,20 +41,21 @@ Metrics update live as positions change.
 - **Risk of Liquidation** — per-position volatility-based liquidation probability
 - Constants auto-extracted from the Lighter frontend bundle on page load
 
-### Hyperliquid UI Enhancements
-- **Tighter spacing** — Account Equity and Perps Overview sections condensed (10px → 4px gaps)
-- **Buttons on one row** — Deposit, Perps→Spot, and Withdraw flattened to a single line
-- **Bluish accent** — injected content uses a distinct hue to separate from native UI
-
 ### TradingView Equation (Both Platforms)
 - One-click copy of a weighted portfolio equation for TradingView charting
 - Top 10 positions by notional, weighted long/short exposure
+- Shows the full equation for 2 seconds after copying
 - **Lighter:** Uses `SYMBOL^weight` format with USDT pairs
 - **Hyperliquid:** Smart ticker mapping:
   - Crypto perps → `BINANCE:BTCUSDT.P`
   - xyz equities (NVDA, TSLA) → native exchange (`NASDAQ:NVDA`)
   - Korean stocks → KRX tickers (`KRX:005930`)
   - Pre-launch/vntl → best-effort fallback
+
+### Hyperliquid UI Enhancements
+- **Tighter spacing** — Account Equity and Perps Overview sections condensed (10px → 4px gaps)
+- **Buttons on one row** — Deposit, Perps→Spot, and Withdraw flattened to a single line
+- **Bluish accent** — injected content uses a distinct hue to separate from native UI
 
 ## Hotkey Controls
 
@@ -78,14 +79,18 @@ Same shortcuts on both platforms. On Hyperliquid, ⌥+A opens the **Pro** dropdo
 ## Architecture
 
 ```
-platform.js          — Platform detection & selector abstraction
-content.js           — Lighter: metrics, funding (WS+REST), risk
+platform.js          — Platform detection & selector abstraction (text-based, no class dependencies)
+content.js           — Lighter: metrics, funding (WS+REST), risk, TV equation
 hotkeys.js           — Lighter: keyboard shortcuts
 volatility.js        — Lighter: volatility column injection
-hl-content.js        — Hyperliquid: metrics, funding (3-dex REST), UI tweaks
+hl-content.js        — Hyperliquid: metrics, funding (3-dex REST), UI tweaks, TV equation
 hl-hotkeys.js        — Hyperliquid: keyboard shortcuts
 manifest.json        — MV3, content scripts per domain
 ```
+
+### Selector Strategy
+- **Lighter**: Uses `data-testid` attributes (stable across deploys)
+- **Hyperliquid**: Uses text content matching (header text, label text, inline style colors) instead of CSS class names which change on each deploy
 
 ## Installation
 
