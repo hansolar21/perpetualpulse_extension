@@ -170,18 +170,19 @@
         row.onmouseleave = () => { labelSpan.style.color = EXT_COLOR_DIM; };
 
         const handler = async (e) => {
-            console.log("[Perpetualpulse] TV equation clicked");
             e.stopPropagation();
             e.preventDefault();
             try {
-                const eq = await onClick();
-                console.log("[Perpetualpulse] TV equation result:", eq);
-                labelSpan.innerText = eq || "Copied!";
-                setTimeout(() => (labelSpan.innerText = "📋 Copy TradingView equation"), 2500);
+                await onClick();
+                const prevColor = labelSpan.style.color;
+                labelSpan.innerText = "✓ Copied to clipboard";
+                labelSpan.style.color = "rgba(130, 255, 170, 0.95)";
+                setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; labelSpan.style.color = prevColor; }, 1500);
             } catch (err) {
                 console.error("[Perpetualpulse] Copy TV equation failed:", err);
-                labelSpan.innerText = "Error";
-                setTimeout(() => (labelSpan.innerText = "📋 Copy TradingView equation"), 1500);
+                labelSpan.innerText = "✗ Copy failed";
+                labelSpan.style.color = "rgba(255, 130, 130, 0.95)";
+                setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; labelSpan.style.color = EXT_COLOR_DIM; }, 1500);
             }
         };
         row.addEventListener("mousedown", handler, true);

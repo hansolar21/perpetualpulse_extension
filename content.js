@@ -398,15 +398,19 @@ function formatCopyEquationRow(onClick, id = "") {
     const handler = async (e) => {
         e.stopPropagation();
         try {
-            const eq = await onClick();
-            const prev = labelSpan.innerText;
-            labelSpan.innerText = eq || "Copied!";
-            setTimeout(() => (labelSpan.innerText = prev), 2500);
+            await onClick();
+            const prevText = labelSpan.innerText;
+            const prevColor = labelSpan.style.color;
+            labelSpan.innerText = "✓ Copied to clipboard";
+            labelSpan.style.color = "rgba(130, 255, 170, 0.95)";
+            setTimeout(() => { labelSpan.innerText = prevText; labelSpan.style.color = prevColor; }, 1500);
         } catch (err) {
             console.error("[Perpetualpulse] Copy TV equation failed:", err);
-            const prev = labelSpan.innerText;
-            labelSpan.innerText = "Error";
-            setTimeout(() => (labelSpan.innerText = prev), 1500);
+            const prevText = labelSpan.innerText;
+            const prevColor = labelSpan.style.color;
+            labelSpan.innerText = "✗ Copy failed";
+            labelSpan.style.color = "rgba(255, 130, 130, 0.95)";
+            setTimeout(() => { labelSpan.innerText = prevText; labelSpan.style.color = prevColor; }, 1500);
         }
     };
     row.addEventListener("mousedown", handler, true);
