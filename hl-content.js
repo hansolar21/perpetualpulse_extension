@@ -27,22 +27,43 @@
             return _hlFundingRates;
         }
         try {
-            const resp = await fetch("https://api.hyperliquid.xyz/info", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ type: "metaAndAssetCtxs" }),
-            });
-            const data = await resp.json();
-            const universe = data[0]?.universe || [];
-            const ctxs = data[1] || [];
             const newRates = {};
-            for (let i = 0; i < universe.length && i < ctxs.length; i++) {
-                const sym = universe[i].name?.toUpperCase();
-                const rate = parseFloat(ctxs[i].funding);
-                if (sym && !isNaN(rate)) {
-                    newRates[sym] = rate;
-                }
+
+            // Fetch both standard perps and vntl (pre-launch/venture) in parallel
+            const [mainResp, vntlResp] = await Promise.all([
+                fetch("https://api.hyperliquid.xyz/info", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+                }),
+                fetch("https://api.hyperliquid.xyz/info", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: "metaAndAssetCtxs", dex: "vntl" }),
+                }),
+            ]);
+
+            // Parse standard perps
+            const mainData = await mainResp.json();
+            const mainUniverse = mainData[0]?.universe || [];
+            const mainCtxs = mainData[1] || [];
+            for (let i = 0; i < mainUniverse.length && i < mainCtxs.length; i++) {
+                const sym = mainUniverse[i].name?.toUpperCase();
+                const rate = parseFloat(mainCtxs[i].funding);
+                if (sym && !isNaN(rate)) newRates[sym] = rate;
             }
+
+            // Parse vntl assets (names come as "vntl:ANTHROPIC" — strip prefix)
+            const vntlData = await vntlResp.json();
+            const vntlUniverse = vntlData[0]?.universe || [];
+            const vntlCtxs = vntlData[1] || [];
+            for (let i = 0; i < vntlUniverse.length && i < vntlCtxs.length; i++) {
+                let sym = (vntlUniverse[i].name || "").toUpperCase();
+                sym = sym.replace(/^VNTL:/, ""); // strip "vntl:" prefix
+                const rate = parseFloat(vntlCtxs[i].funding);
+                if (sym && !isNaN(rate)) newRates[sym] = rate;
+            }
+
             _hlFundingRates = newRates;
             _hlFundingLastFetch = Date.now();
         } catch (e) {
@@ -91,13 +112,13 @@
 
     function formatRow(label, value, id = "", isFirst = false, tooltip = null) {
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;";
+        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;line-height:1.2;padding:1px 0;";
         row.setAttribute("data-injected", "pp-hl");
         if (id) row.setAttribute("data-injected-id", id);
         if (isFirst) {
             row.style.borderTop = "1px solid rgba(130, 170, 255, 0.15)";
-            row.style.paddingTop = "4px";
-            row.style.marginTop = "4px";
+            row.style.paddingTop = "3px";
+            row.style.marginTop = "3px";
         }
 
         const labelDiv = document.createElement("div");
@@ -155,28 +176,43 @@
     }
 
     // ---------- Funding injection into table ----------
+    function findFundingColIdx(table) {
+        // HL header row: <tr> with <td> cells containing nested divs with header text
+        const firstRow = table.querySelector("tr");
+        if (!firstRow) return -1;
+        const cells = firstRow.querySelectorAll("td, th");
+        for (let i = 0; i < cells.length; i++) {
+            // Check all nested text nodes, ignoring SVGs
+            const divs = cells[i].querySelectorAll("div");
+            for (const d of divs) {
+                // Only check leaf text
+                if (d.children.length === 0 || (d.children.length === 0 && d.textContent)) {
+                    if (/^Funding$/i.test(d.textContent.trim())) return i;
+                }
+            }
+            // Also direct check
+            const directText = cells[i].querySelector('div[class*="bFBYgR"], div[class*="bjfHbI"]');
+            if (directText && /^Funding$/i.test(directText.textContent.trim())) return i;
+        }
+        return -1;
+    }
+
     function injectFundingRates(table) {
         if (!table) return;
 
-        // Find funding column index
-        const firstRow = table.querySelector("tr");
-        if (!firstRow) return;
-        const cells = firstRow.querySelectorAll("td, th");
-        let fundingIdx = -1;
-        cells.forEach((c, i) => {
-            if (/^Funding$/i.test(c.textContent.trim())) fundingIdx = i;
-        });
+        const fundingIdx = findFundingColIdx(table);
         if (fundingIdx < 0) return;
 
-        // Get data rows
-        const rows = table.querySelectorAll("tbody tr, tr");
-        rows.forEach((row) => {
+        // Get all rows, skip header
+        const allRows = table.querySelectorAll("tr");
+        allRows.forEach((row, rowIdx) => {
+            if (rowIdx === 0) return; // skip header
             const tds = row.querySelectorAll("td");
             if (tds.length <= fundingIdx) return;
 
             const td0 = tds[0];
             const symbol = cfg.getSymbolFromCell(td0);
-            if (!symbol || /Coin/i.test(symbol)) return; // skip header
+            if (!symbol || /Coin/i.test(symbol)) return;
 
             const rate = getFundingRate(symbol);
             const fundingTd = tds[fundingIdx];
@@ -240,7 +276,7 @@
             const container = cfg.getAccountContainer();
             if (!container) return;
 
-            // Remove old injections
+            // Remove old injections (but keep wrapper for reuse)
             container.querySelectorAll('[data-injected="pp-hl"]').forEach((el) => el.remove());
 
             const portVal = safeEquity();
@@ -268,7 +304,16 @@
                 formatRow("Net Leverage:", `${netLeverage.toFixed(2)}x (${fmtDollar(netExposure)})`, "hl-ls-5"),
             ];
 
-            rows.forEach((r) => container.appendChild(r));
+            // Wrap in a tight container to control spacing
+            let wrapper = container.querySelector('[data-injected="pp-hl-wrapper"]');
+            if (!wrapper) {
+                wrapper = document.createElement("div");
+                wrapper.setAttribute("data-injected", "pp-hl-wrapper");
+                wrapper.style.cssText = "display:flex;flex-direction:column;gap:0px;";
+                container.appendChild(wrapper);
+            }
+            wrapper.innerHTML = "";
+            rows.forEach((r) => wrapper.appendChild(r));
         } finally {
             _injecting = false;
         }
