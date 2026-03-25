@@ -174,18 +174,12 @@
             e.stopPropagation();
             e.preventDefault();
             try {
-                await onClick();
-                const prevColor = labelSpan.style.color;
-                _feedbackUntil = Date.now() + 1600;
-                labelSpan.innerText = "✓ Copied to clipboard";
-                labelSpan.style.color = "rgba(130, 255, 170, 0.95)";
-                setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; labelSpan.style.color = prevColor; }, 1500);
+                const eq = await onClick();
+                _feedbackUntil = Date.now() + 2100;
+                labelSpan.innerText = eq || "Copied!";
+                setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; }, 2000);
             } catch (err) {
                 console.error("[Perpetualpulse] Copy TV equation failed:", err);
-                _feedbackUntil = Date.now() + 1600;
-                labelSpan.innerText = "✗ Copy failed";
-                labelSpan.style.color = "rgba(255, 130, 130, 0.95)";
-                setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; labelSpan.style.color = EXT_COLOR_DIM; }, 1500);
             }
         };
         row.addEventListener("mousedown", handler, true);
