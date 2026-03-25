@@ -152,21 +152,24 @@
                 return null;
             },
 
-            // Positions table
+            // Positions table — find by header content, not class names
             getPositionsTable: () => {
-                // HL positions table — find table inside the positions panel
                 const tables = document.querySelectorAll("table");
                 for (const t of tables) {
-                    const headers = t.querySelectorAll("th, td.sc-gScZFl, td[class*='gScZFl']");
-                    for (const h of headers) {
-                        if (/\bCoin\b/.test(h.textContent)) return t;
+                    const firstRow = t.querySelector("tr");
+                    if (!firstRow) continue;
+                    const headerText = firstRow.textContent || "";
+                    // Positions table has Coin + Size + Entry Price headers
+                    if (/\bCoin\b/.test(headerText) && /\bSize\b/.test(headerText) && /\bEntry\b/.test(headerText)) {
+                        return t;
                     }
                 }
-                // Fallback: first table with "Coin" in header
+                // Looser fallback: any table with Coin header
                 for (const t of tables) {
-                    if (/\bCoin\b/.test(t.querySelector("tr")?.textContent || "")) return t;
+                    const firstRow = t.querySelector("tr");
+                    if (firstRow && /\bCoin\b/.test(firstRow.textContent || "")) return t;
                 }
-                return tables[0] || null;
+                return null;
             },
             isLongRow: (td0) => {
                 // HL indicates direction via left border color: green = long, red = short
@@ -196,34 +199,32 @@
                 return false;
             },
             getSymbolFromCell: (td0) => {
-                // HL coin cell: <a class="...">ANTHROPIC</a>
-                const link = td0.querySelector('a[class*="kaaNBM"], a[class*="dmctIk"]');
-                if (link) {
+                // HL coin cell: first <a> with bold font is the symbol
+                const links = td0.querySelectorAll("a");
+                for (const link of links) {
                     const text = link.textContent.trim();
-                    if (/^[A-Za-z0-9]{1,20}$/.test(text)) return text;
+                    // Symbol is typically uppercase letters/digits, 1-20 chars
+                    // Skip leverage labels like "3x" and tags like "vntl"
+                    if (/^[A-Za-z]{2,20}[0-9]*$/.test(text) && !/^\d+x$/i.test(text)) return text;
                 }
-                // Fallback
+                // Fallback: first word in cell
                 return (td0.textContent || "").trim().split(/[\s\n]/)[0].replace(/[^A-Za-z0-9]/g, "") || "";
             },
-            positionRowSelector: "tbody tr[class*='gZZrjv'], tbody tr[class*='iOeugr']:not(:first-child)",
+            positionRowSelector: "tbody tr:not(:first-child)",
 
-            // Account section — find parent of "Account Equity" and "Perps Overview"
+            // Account section — find smallest container with both "Account Equity" and "Perps Overview"
             getAccountContainer: () => {
-                // Walk up from "Perps Overview" text to find the scrollable container
-                const divs = document.querySelectorAll('div');
-                for (const d of divs) {
-                    const text = (d.firstChild?.textContent || "").trim();
-                    if (text === "Perps Overview") {
-                        // Go up to find the container with both Account Equity and Perps Overview
-                        let parent = d.parentElement;
-                        for (let i = 0; i < 5 && parent; i++) {
-                            const txt = parent.textContent || "";
-                            if (/Account Equity/.test(txt) && /Perps Overview/.test(txt)) return parent;
-                            parent = parent.parentElement;
-                        }
+                const all = document.querySelectorAll("div");
+                let best = null;
+                let bestSize = Infinity;
+                for (const d of all) {
+                    const txt = d.textContent || "";
+                    if (/Account Equity/.test(txt) && /Perps Overview/.test(txt)) {
+                        const size = txt.length;
+                        if (size < bestSize) { bestSize = size; best = d; }
                     }
                 }
-                return null;
+                return best;
             },
 
             // Funding rates

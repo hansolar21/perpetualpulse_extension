@@ -8,6 +8,15 @@
 
     console.log("[Perpetualpulse] Hyperliquid content.js active");
 
+    // Single global pointerdown handler for TV equation copy (avoids listener leaks)
+    document.addEventListener("pointerdown", (e) => {
+        const row = e.target.closest("[data-pp-tv]");
+        if (!row || !row._ppHandler) return;
+        e.stopPropagation();
+        e.preventDefault();
+        row._ppHandler();
+    }, true);
+
     const EXT_COLOR = "rgba(160, 195, 255, 0.95)";
     const EXT_COLOR_DIM = "rgba(160, 195, 255, 0.70)";
 
@@ -106,11 +115,9 @@
 
     async function copyTradingViewEquation(table, weightDecimals = 4) {
         if (!table) throw new Error("No table");
-        console.log("[Perpetualpulse] TV equation: table found, scanning rows...");
 
         const positions = [];
         const allRows = table.querySelectorAll("tr");
-        console.log("[Perpetualpulse] TV equation: found", allRows.length, "rows");
         allRows.forEach((row, rowIdx) => {
             if (rowIdx === 0) return;
             const tds = row.querySelectorAll("td");
@@ -123,7 +130,6 @@
             const isLong = cfg.isLongRow(td0);
             const isShort = cfg.isShortRow(td0);
             const notional = Math.abs(parseUSD(tds[2].textContent));
-            console.log("[Perpetualpulse] TV equation row:", sym, "long=", isLong, "short=", isShort, "notional=", notional);
 
             if (!isLong && !isShort) return;
             if (!(notional > 0)) return;
@@ -170,20 +176,14 @@
         row.onmouseenter = () => { labelSpan.style.opacity = "0.8"; };
         row.onmouseleave = () => { labelSpan.style.opacity = "1"; };
 
-        const rowId = "pp-tv-eq-" + Math.random().toString(36).slice(2, 8);
-        row.setAttribute("data-pp-tv", rowId);
-        document.addEventListener("pointerdown", (e) => {
-            if (!e.target.closest(`[data-pp-tv="${rowId}"]`)) return;
-            e.stopPropagation();
-            e.preventDefault();
+        row.setAttribute("data-pp-tv", "1");
+        row._ppHandler = () => {
             _feedbackUntil = Date.now() + 2100;
             onClick().then((eq) => {
                 labelSpan.innerText = eq || "Copied!";
                 setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; }, 2000);
-            }).catch((err) => {
-                console.error("[Perpetualpulse] Copy TV equation failed:", err);
-            });
-        }, true);
+            }).catch(() => {});
+        };
 
         return row;
     }

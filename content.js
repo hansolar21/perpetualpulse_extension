@@ -5,7 +5,15 @@
 // ==/UserScript==
 
 console.log("[Perpetualpulse] content.js injected");
-console.log("[Perpetualpulse] patch loaded at", performance.now());
+
+// Single global pointerdown handler for TV equation copy (avoids listener leaks)
+document.addEventListener("pointerdown", (e) => {
+    const row = e.target.closest("[data-pp-tv]");
+    if (!row || !row._ppHandler) return;
+    e.stopPropagation();
+    e.preventDefault();
+    row._ppHandler();
+}, true);
 
 window._patch_test = 1;
 
@@ -394,21 +402,14 @@ function formatCopyEquationRow(onClick, id = "") {
         labelSpan.style.opacity = "1";
     });
 
-    // Use document-level capture to guarantee first-click works
-    const rowId = "pp-tv-eq-" + Math.random().toString(36).slice(2, 8);
-    row.setAttribute("data-pp-tv", rowId);
-    document.addEventListener("pointerdown", (e) => {
-        if (!e.target.closest(`[data-pp-tv="${rowId}"]`)) return;
-        e.stopPropagation();
-        e.preventDefault();
+    row.setAttribute("data-pp-tv", "1");
+    row._ppHandler = () => {
         _feedbackUntil = Date.now() + 2100;
         onClick().then((eq) => {
             labelSpan.innerText = eq || "Copied!";
             setTimeout(() => { labelSpan.innerText = "Copy TradingView equation"; }, 2000);
-        }).catch((err) => {
-            console.error("[Perpetualpulse] Copy TV equation failed:", err);
-        });
-    }, true);
+        }).catch(() => {});
+    };
 
     row.appendChild(leftWrap);
     return row;
