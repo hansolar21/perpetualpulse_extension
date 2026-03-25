@@ -100,3 +100,10 @@ manifest.json        — MV3, content scripts per domain
 4. Visit [app.lighter.xyz](https://app.lighter.xyz/trade) or [app.hyperliquid.xyz](https://app.hyperliquid.xyz/trade) — metrics appear automatically.
 
 **To update:** `git pull` and click the refresh icon on `chrome://extensions`.
+
+## Troubleshooting
+
+- **Extension not loading?** Chrome may disable unpacked extensions on restart. Go to `chrome://extensions` and re-enable it (toggle the switch).
+- **Metrics not appearing?** Make sure you're on a `/trade/` page with the Positions tab active. Reload the page if needed.
+- **Funding rates missing for some coins?** Pre-launch (vntl) and HIP-3 (xyz) assets are fetched from separate API endpoints. If a new dex is added to Hyperliquid, the extension may need an update.
+- **After a site update, things look broken?** Lighter uses stable `data-testid` selectors. Hyperliquid uses text-based matching which is resilient but not bulletproof — report issues if selectors stop matching after a deploy.
