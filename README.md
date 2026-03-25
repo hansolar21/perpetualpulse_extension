@@ -1,71 +1,91 @@
-# Perpetualpulse Lighter Trading Metrics Extension
+# Perpetualpulse Trading Extension
 
 ## Summary
 
-A lightweight browser extension that injects real-time trading metrics, live funding rates, and keyboard shortcuts directly into the [Lighter.xyz](https://lighter.xyz) trading interface.
+A browser extension that injects real-time trading metrics, live funding rates, and keyboard shortcuts into [Lighter.xyz](https://app.lighter.xyz) and [Hyperliquid](https://app.hyperliquid.xyz) trading interfaces.
+
+## Supported Platforms
+
+| Platform | Metrics | Funding Rates | Hotkeys | Risk Metrics |
+|---|---|---|---|---|
+| **Lighter.xyz** | ✅ | ✅ (WebSocket + REST) | ✅ | ✅ (VaR, Beta, Liq) |
+| **Hyperliquid** | ✅ | ✅ (REST — perps, vntl, xyz) | ✅ | — |
 
 ## Features
 
-### Portfolio Metrics
+### Portfolio Metrics (Both Platforms)
 - **Long vs Short:** Dollar exposure on both sides
 - **L/S Ratio:** Relative size of longs to shorts
-- **Exposure vs Portfolio:** Leverage vs portfolio value, with pair counts
+- **Long/Short vs Portfolio:** Leverage vs equity, with pair counts
 - **Net Leverage:** Overall directional leverage across all positions
-- **TradingView Equation:** One-click copy of a weighted portfolio equation for TradingView charting
 - **Show/Hide Values:** Click any metric value to mask it
 
-All metrics update live as positions change — no manual refresh needed.
+Metrics update live as positions change.
 
 ### Live Funding Rates
-- Fetches funding rates from the Lighter API every 30 seconds
-- Displays the current funding rate inline in the Funding column of the positions table
-- Color-coded: green for positive, red for negative
-- Positions table columns automatically adjusted (Size narrowed, Funding widened) to accommodate the extra data
 
-### Risk Metrics
-- **Value at Risk (VaR)** — maximum expected loss over 24H at 95% confidence, matching Lighter's quant page calculation
-- **Net Beta** — weighted average beta across all positions, indicating overall market risk exposure
-- **Risk of Liquidation** — probability of liquidation based on per-position volatility and distance to liquidation price
-- Risk constants (volatility, beta, drift per market) are automatically extracted from the Lighter frontend bundle on page load — always in sync with Lighter's own calculations
+**Lighter:**
+- WebSocket (`market_stats` channel) for live predicted rates, REST API fallback
+- Auto-reconnect with exponential backoff
 
-### Visual Distinction
-All extension-injected content uses a slight bluish hue to distinguish it from native Lighter UI elements.
+**Hyperliquid:**
+- Fetches from 3 dexes in parallel every 15s:
+  - Standard perps (`metaAndAssetCtxs`)
+  - Pre-launch/venture assets (`dex: "vntl"` — ANTHROPIC, SPACEX, etc.)
+  - HIP-3 equities (`dex: "xyz"` — NVDA, TSLA, GOLD, etc.)
+- Displayed inline in the Funding column, color-coded green/red
+
+### Risk Metrics (Lighter Only)
+- **Value at Risk (VaR)** — max expected loss over 24H at 95% confidence
+- **Net Beta** — weighted portfolio beta relative to BTC
+- **Risk of Liquidation** — per-position volatility-based liquidation probability
+- Constants auto-extracted from the Lighter frontend bundle on page load
+
+### Hyperliquid UI Enhancements
+- **Tighter spacing** — Account Equity and Perps Overview sections condensed (10px → 4px gaps)
+- **Buttons on one row** — Deposit, Perps→Spot, and Withdraw flattened to a single line
+- **Bluish accent** — injected content uses a distinct hue to separate from native UI
+
+### TradingView Equation (Lighter)
+- One-click copy of a weighted portfolio equation for TradingView charting
+- Top 10 positions by notional, weighted by exposure
 
 ## Hotkey Controls
 
-Speed up trading with built-in keyboard shortcuts:
+Same shortcuts on both platforms. On Hyperliquid, ⌥+A opens the **Pro** dropdown (equivalent to Lighter's Advanced).
 
 | Action | Mac | Windows/Linux |
 |---|---|---|
 | Switch to Market tab | ⌥ + M | Alt + M |
 | Switch to Limit tab | ⌥ + L | Alt + L |
-| Open Advanced dropdown | ⌥ + A | Alt + A |
+| Open Advanced / Pro dropdown | ⌥ + A | Alt + A |
 | Select TWAP (when dropdown open) | ⌥ + T | Alt + T |
-| Switch to Buy side | ⌥ + B | Alt + B |
-| Switch to Sell side | ⌥ + S | Alt + S |
+| Switch to Buy / Long | ⌥ + B | Alt + B |
+| Switch to Sell / Short | ⌥ + S | Alt + S |
 | Execute trade (in Amount input) | Enter | Enter |
 | **Show/hide hotkey badges** | **Double-tap ⌥** | **Double-tap Alt** |
 
 - **Badges**: Hotkey hints appear next to tabs/buttons while holding Option/Alt.
 - **Focus**: After any hotkey, cursor jumps to the Amount input.
-- **One-touch trading**: Press **Enter** while Amount input is focused to place your order.
-- **TWAP workflow**: Press ⌥+A to open the Advanced dropdown, then ⌥+T to select TWAP.
+- **TWAP workflow**: ⌥+A to open dropdown, then ⌥+T to select TWAP.
 
-### Example Workflow
+## Architecture
 
-1. **Hold Option/Alt** to see hotkey badges.
-2. Press **M/L/B/S** to switch order type or side.
-3. Type your amount.
-4. Press **Enter** to trade.
+```
+platform.js          — Platform detection & selector abstraction
+content.js           — Lighter: metrics, funding (WS+REST), risk
+hotkeys.js           — Lighter: keyboard shortcuts
+volatility.js        — Lighter: volatility column injection
+hl-content.js        — Hyperliquid: metrics, funding (3-dex REST), UI tweaks
+hl-hotkeys.js        — Hyperliquid: keyboard shortcuts
+manifest.json        — MV3, content scripts per domain
+```
 
----
+## Installation
 
-## Manual Installation (Chrome, Edge, Brave, etc.)
+1. Clone or download this repo.
+2. Open `chrome://extensions` → enable **Developer mode**.
+3. Click **Load unpacked** → select this folder.
+4. Visit [app.lighter.xyz](https://app.lighter.xyz/trade) or [app.hyperliquid.xyz](https://app.hyperliquid.xyz/trade) — metrics appear automatically.
 
-1. **Download the extension ZIP** and unzip it to a folder on your computer.
-2. Open your browser and go to `chrome://extensions` (or menu > Extensions).
-3. **Enable "Developer mode"** (toggle in the top-right).
-4. Click **"Load unpacked"** and select the folder you just unzipped.
-5. Visit [https://app.lighter.xyz](https://app.lighter.xyz) — the metrics will appear automatically.
-
-**To update:** Pull latest changes and click the refresh icon on `chrome://extensions`.
+**To update:** `git pull` and click the refresh icon on `chrome://extensions`.
