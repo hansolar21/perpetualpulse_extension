@@ -290,34 +290,11 @@ function formatFundingRate(rate) {
 }
 
 // ---------- Info Icon / Tooltip ----------
-function _ensureTooltipCSS() {
-    if (document.getElementById("pp-tooltip-css")) return;
-    const style = document.createElement("style");
-    style.id = "pp-tooltip-css";
-    style.textContent = `
-        .pp-info { position:relative; cursor:help; font-size:11px; opacity:0.6; margin-left:3px; display:inline-block; }
-        .pp-info .pp-tip {
-            display:none; position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
-            width:max-content; max-width:220px; padding:6px 10px; border-radius:4px;
-            background:#1a1a2e; border:1px solid rgba(160,195,255,0.3);
-            color:#ddd; font-size:11px; line-height:1.4; white-space:normal;
-            z-index:99999; pointer-events:none;
-        }
-        .pp-info:hover .pp-tip { display:block; }
-    `;
-    (document.head || document.documentElement).appendChild(style);
-}
-
 function createInfoIcon(tooltipText) {
-    _ensureTooltipCSS();
     const info = document.createElement("span");
-    info.className = "pp-info";
-    info.style.color = EXT_COLOR_DIM;
     info.innerText = "ⓘ";
-    const tip = document.createElement("span");
-    tip.className = "pp-tip";
-    tip.textContent = tooltipText;
-    info.appendChild(tip);
+    info.title = tooltipText;
+    info.style.cssText = `cursor:help;font-size:11px;opacity:0.6;color:${EXT_COLOR_DIM};margin-left:3px;`;
     info.addEventListener("click", (e) => { e.stopPropagation(); });
     return info;
 }
