@@ -9,7 +9,7 @@ A browser extension that injects real-time trading metrics, live funding rates, 
 | Platform | Metrics | Funding Rates | Hotkeys | Risk Metrics |
 |---|---|---|---|---|
 | **Lighter.xyz** | ✅ | ✅ (WebSocket + REST) | ✅ | ✅ (VaR, Beta, Liq) |
-| **Hyperliquid** | ✅ | ✅ (REST — perps, vntl, xyz) | ✅ | — |
+| **Hyperliquid** | ✅ | ✅ (REST — perps, vntl, xyz) | ✅ | ✅ (TV equation) |
 
 ## Features
 
@@ -46,9 +46,15 @@ Metrics update live as positions change.
 - **Buttons on one row** — Deposit, Perps→Spot, and Withdraw flattened to a single line
 - **Bluish accent** — injected content uses a distinct hue to separate from native UI
 
-### TradingView Equation (Lighter)
+### TradingView Equation (Both Platforms)
 - One-click copy of a weighted portfolio equation for TradingView charting
-- Top 10 positions by notional, weighted by exposure
+- Top 10 positions by notional, weighted long/short exposure
+- **Lighter:** Uses `SYMBOL^weight` format with USDT pairs
+- **Hyperliquid:** Smart ticker mapping:
+  - Crypto perps → `BINANCE:BTCUSDT.P`
+  - xyz equities (NVDA, TSLA) → native exchange (`NASDAQ:NVDA`)
+  - Korean stocks → KRX tickers (`KRX:005930`)
+  - Pre-launch/vntl → best-effort fallback
 
 ## Hotkey Controls
 
