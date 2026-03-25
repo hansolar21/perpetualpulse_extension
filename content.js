@@ -290,50 +290,11 @@ function formatFundingRate(rate) {
 }
 
 // ---------- Info Icon / Tooltip ----------
-// Single shared tooltip element
-let _ppTooltip = null;
-let _ppTooltipHideTimer = null;
-
-function getPPTooltip() {
-    if (_ppTooltip) return _ppTooltip;
-    _ppTooltip = document.createElement("div");
-    _ppTooltip.setAttribute("data-pp-tooltip", "1");
-    _ppTooltip.style.cssText = `
-        position: fixed; z-index: 99999; max-width: 250px;
-        padding: 6px 10px; border-radius: 4px;
-        background: #1a1a2e; border: 1px solid rgba(160,195,255,0.3);
-        color: #ddd; font-size: 11px; line-height: 1.4;
-        pointer-events: none; opacity: 0; transition: opacity 0.15s;
-        white-space: normal; word-wrap: break-word;
-    `;
-    document.body.appendChild(_ppTooltip);
-    return _ppTooltip;
-}
-
 function createInfoIcon(tooltipText) {
     const info = document.createElement("span");
     info.innerText = "ⓘ";
-    info.style.cursor = "help";
-    info.style.fontSize = "11px";
-    info.style.opacity = "0.6";
-    info.style.color = EXT_COLOR_DIM;
-    info.style.marginLeft = "3px";
-
-    info.addEventListener("mouseenter", () => {
-        clearTimeout(_ppTooltipHideTimer);
-        const tip = getPPTooltip();
-        tip.textContent = tooltipText;
-        const rect = info.getBoundingClientRect();
-        tip.style.left = Math.min(rect.left, window.innerWidth - 260) + "px";
-        tip.style.top = (rect.bottom + 4) + "px";
-        tip.style.opacity = "1";
-    });
-    info.addEventListener("mouseleave", () => {
-        _ppTooltipHideTimer = setTimeout(() => {
-            const tip = getPPTooltip();
-            tip.style.opacity = "0";
-        }, 100);
-    });
+    info.title = tooltipText;
+    info.style.cssText = `cursor:help;font-size:11px;opacity:0.6;color:${EXT_COLOR_DIM};margin-left:3px;`;
     info.addEventListener("click", (e) => { e.stopPropagation(); });
     return info;
 }
