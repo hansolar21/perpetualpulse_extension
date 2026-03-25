@@ -382,20 +382,29 @@
             // Found it — restyle to row
             btnCol.style.flexDirection = "row";
             btnCol.style.gap = "4px";
-            btnCol.style.alignItems = "stretch";
+            btnCol.style.alignItems = "center";
             b.style.flex = "1";
             b.style.minWidth = "0";
             b.style.padding = "4px 0";
             b.style.fontSize = "11px";
+            b.style.lineHeight = "1";
+            b.style.display = "flex";
+            b.style.alignItems = "center";
+            b.style.justifyContent = "center";
             const gridDiv = btnCol.querySelector('div[style*="grid-template-columns"]');
             if (gridDiv) {
                 gridDiv.style.flex = "2";
                 gridDiv.style.gap = "4px";
+                gridDiv.style.alignItems = "center";
             }
             // Shrink the inner buttons too
             gridDiv?.querySelectorAll("button").forEach((gb) => {
                 gb.style.padding = "4px 0";
                 gb.style.fontSize = "11px";
+                gb.style.lineHeight = "1";
+                gb.style.display = "flex";
+                gb.style.alignItems = "center";
+                gb.style.justifyContent = "center";
             });
             break;
         }
