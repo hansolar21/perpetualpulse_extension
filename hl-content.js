@@ -170,17 +170,16 @@
         row.onmouseenter = () => { labelSpan.style.color = "rgb(212, 68, 77)"; };
         row.onmouseleave = () => { labelSpan.style.color = EXT_COLOR_DIM; };
 
-        const handler = async (e) => {
+        const handler = (e) => {
             e.stopPropagation();
             e.preventDefault();
-            try {
-                const eq = await onClick();
-                _feedbackUntil = Date.now() + 2100;
+            _feedbackUntil = Date.now() + 2100;
+            onClick().then((eq) => {
                 labelSpan.innerText = eq || "Copied!";
                 setTimeout(() => { labelSpan.innerText = "📋 Copy TradingView equation"; }, 2000);
-            } catch (err) {
+            }).catch((err) => {
                 console.error("[Perpetualpulse] Copy TV equation failed:", err);
-            }
+            });
         };
         row.addEventListener("mousedown", handler, true);
         labelSpan.addEventListener("mousedown", handler, true);

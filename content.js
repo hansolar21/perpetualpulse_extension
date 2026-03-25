@@ -395,16 +395,16 @@ function formatCopyEquationRow(onClick, id = "") {
         labelSpan.style.color = EXT_COLOR_DIM;
     });
 
-    const handler = async (e) => {
+    const handler = (e) => {
         e.stopPropagation();
-        try {
-            const eq = await onClick();
-            _feedbackUntil = Date.now() + 2100;
+        e.preventDefault();
+        _feedbackUntil = Date.now() + 2100;
+        onClick().then((eq) => {
             labelSpan.innerText = eq || "Copied!";
             setTimeout(() => { labelSpan.innerText = "Copy TradingView equation"; }, 2000);
-        } catch (err) {
+        }).catch((err) => {
             console.error("[Perpetualpulse] Copy TV equation failed:", err);
-        }
+        });
     };
     row.addEventListener("mousedown", handler, true);
     leftWrap.addEventListener("mousedown", handler, true);
