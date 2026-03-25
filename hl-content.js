@@ -163,7 +163,7 @@
 
     function formatCopyEquationRow(onClick, id = "") {
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;line-height:1.4;padding:2px 0;cursor:pointer;user-select:none;position:relative;z-index:10;";
+        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;position:relative;z-index:10;";
         row.setAttribute("data-injected", "pp-hl");
         if (id) row.setAttribute("data-injected-id", id);
 
@@ -211,13 +211,13 @@
 
     function formatRow(label, value, id = "", isFirst = false, tooltip = null) {
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;line-height:1.4;padding:2px 0;";
+        row.style.cssText = "display:flex;width:100%;align-items:center;justify-content:space-between;";
         row.setAttribute("data-injected", "pp-hl");
         if (id) row.setAttribute("data-injected-id", id);
         if (isFirst) {
             row.style.borderTop = "1px solid rgba(130, 170, 255, 0.15)";
-            row.style.paddingTop = "3px";
-            row.style.marginTop = "3px";
+            row.style.paddingTop = "4px";
+            row.style.marginTop = "4px";
         }
 
         const labelDiv = document.createElement("div");
@@ -422,7 +422,7 @@
             if (!wrapper) {
                 wrapper = document.createElement("div");
                 wrapper.setAttribute("data-injected", "pp-hl-wrapper");
-                wrapper.style.cssText = "display:flex;flex-direction:column;gap:0px;";
+                wrapper.style.cssText = "display:flex;flex-direction:column;gap:4px;";
                 container.appendChild(wrapper);
             }
             wrapper.innerHTML = "";
