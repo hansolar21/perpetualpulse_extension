@@ -289,6 +289,44 @@ function formatFundingRate(rate) {
     return `${sign}${pct}%`;
 }
 
+// ---------- Info Icon / Tooltip ----------
+function createInfoIcon(tooltipText) {
+    const info = document.createElement("span");
+    info.innerText = "ⓘ";
+    info.style.cursor = "help";
+    info.style.fontSize = "11px";
+    info.style.opacity = "0.6";
+    info.style.color = EXT_COLOR_DIM;
+    info.style.position = "relative";
+    info.style.marginLeft = "3px";
+
+    // Tooltip on hover (custom div, not title attr — more reliable)
+    const tip = document.createElement("div");
+    tip.textContent = tooltipText;
+    tip.style.cssText = `
+        position: fixed; z-index: 99999; max-width: 250px;
+        padding: 6px 10px; border-radius: 4px;
+        background: #1a1a2e; border: 1px solid rgba(160,195,255,0.3);
+        color: #ddd; font-size: 11px; line-height: 1.4;
+        pointer-events: none; opacity: 0; transition: opacity 0.15s;
+        white-space: normal; word-wrap: break-word;
+    `;
+    document.body.appendChild(tip);
+
+    info.addEventListener("mouseenter", (e) => {
+        const rect = info.getBoundingClientRect();
+        tip.style.left = Math.min(rect.left, window.innerWidth - 260) + "px";
+        tip.style.top = (rect.bottom + 4) + "px";
+        tip.style.opacity = "1";
+    });
+    info.addEventListener("mouseleave", () => {
+        tip.style.opacity = "0";
+    });
+    // Prevent click from bubbling to parent row handlers
+    info.addEventListener("click", (e) => { e.stopPropagation(); });
+    return info;
+}
+
 // ---------- Utils ----------
 function applyMask(span, realText, isMasked) {
     if (isMasked) {
@@ -300,7 +338,7 @@ function applyMask(span, realText, isMasked) {
     }
 }
 
-function formatRow(label, value, id = "", isFirst = false) {
+function formatRow(label, value, id = "", isFirst = false, tooltip = null) {
     const row = document.createElement("div");
     row.className = "flex w-full items-center justify-between";
     row.setAttribute("data-injected", "ls-info");
@@ -337,6 +375,9 @@ function formatRow(label, value, id = "", isFirst = false) {
     });
 
     labelDiv.appendChild(labelSpan);
+    if (tooltip) {
+        labelDiv.appendChild(createInfoIcon(tooltip));
+    }
     row.appendChild(labelDiv);
     row.appendChild(valueSpan);
     return row;
@@ -364,16 +405,7 @@ function formatCopyEquationRow(onClick, id = "") {
     icon.setAttribute("aria-hidden", "true");
     icon.style.fontSize = "12px";
 
-    const info = document.createElement("span");
-    info.innerText = "ⓘ";
-    info.setAttribute(
-        "title",
-        "Paste into TradingView to see a consolidated chart of your current positions. TradingView only supports 10 combined tickers. This equation implies a 1x leverage relative to your equity."
-    );
-    info.style.cursor = "help";
-    info.style.fontSize = "12px";
-    info.style.opacity = "0.8";
-    info.style.color = EXT_COLOR_DIM;
+    const info = createInfoIcon("Paste into TradingView to see a consolidated chart of your current positions. TradingView only supports 10 combined tickers. This equation implies a 1x leverage relative to your equity.");
 
     leftWrap.appendChild(icon);
     leftWrap.appendChild(labelSpan);
@@ -776,9 +808,12 @@ async function injectMetrics() {
     // Risk metrics (only show if constants loaded)
     if (risk) {
         newRows.push(
-            formatRow("Value at Risk:", fmtPct(risk.valueAtRisk), "ls-line-var"),
-            formatRow("Net Beta:", fmtPct(risk.netBeta), "ls-line-beta"),
-            formatRow("Risk of Liq:", fmtPct(risk.probLiq), "ls-line-liq"),
+            formatRow("Value at Risk:", fmtPct(risk.valueAtRisk), "ls-line-var", false,
+                "Expected maximum loss over 24 hours at 95% confidence, based on per-market historical volatility."),
+            formatRow("Risk of Liq:", fmtPct(risk.probLiq), "ls-line-liq", false,
+                "Probability of liquidation in the next 24 hours, based on per-position distance to liquidation price and market volatility."),
+            formatRow("Net Beta:", fmtPct(risk.netBeta), "ls-line-beta", false,
+                "Weighted portfolio beta relative to BTC. >100% = more volatile than BTC, <100% = less volatile. Negative = inversely correlated."),
         );
     }
 
