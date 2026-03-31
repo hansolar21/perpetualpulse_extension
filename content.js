@@ -840,6 +840,8 @@ function waitForDomAndData() {
     }
 }
 
-waitForDomAndData();
-
-if (window.injectVolatilityColumn) window.injectVolatilityColumn();
+// Only inject metrics on trade pages
+if (/\/trade(\/|$|\?)/.test(location.pathname)) {
+    waitForDomAndData();
+    if (window.injectVolatilityColumn) window.injectVolatilityColumn();
+}
