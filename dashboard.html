@@ -46,46 +46,34 @@
     </div>
 
     <section class="chart-section">
-        <h2>Cumulative P&L</h2>
-        <div class="chart-container large">
-            <canvas id="chart-equity"></canvas>
-        </div>
+        <h2>Cumulative Net P&L</h2>
+        <div class="echart" id="chart-equity"></div>
     </section>
 
     <section class="chart-section">
         <h2>Daily P&L</h2>
-        <div class="chart-container large">
-            <canvas id="chart-daily-pnl"></canvas>
-        </div>
+        <div class="echart" id="chart-daily-pnl"></div>
     </section>
 
     <div class="two-col">
         <section class="chart-section">
             <h2>P&L by Market</h2>
-            <div class="chart-container">
-                <canvas id="chart-market-pnl"></canvas>
-            </div>
+            <div class="echart medium" id="chart-market-pnl"></div>
         </section>
         <section class="chart-section">
             <h2>Volume by Market</h2>
-            <div class="chart-container">
-                <canvas id="chart-market-vol"></canvas>
-            </div>
+            <div class="echart medium" id="chart-market-vol"></div>
         </section>
     </div>
 
     <div class="two-col">
         <section class="chart-section">
             <h2>Maker vs Taker</h2>
-            <div class="chart-container">
-                <canvas id="chart-maker-taker"></canvas>
-            </div>
+            <div class="echart medium" id="chart-maker-taker"></div>
         </section>
         <section class="chart-section">
             <h2>Win Rate by Market</h2>
-            <div class="chart-container">
-                <canvas id="chart-winrate"></canvas>
-            </div>
+            <div class="echart medium" id="chart-winrate"></div>
         </section>
     </div>
 
@@ -132,31 +120,21 @@
     </section>
 
     <section class="chart-section">
-        <h2>Hourly P&L Distribution <span class="chart-hint">(box plot + individual trades)</span></h2>
-        <div class="chart-container large">
-            <canvas id="chart-hourly-box"></canvas>
-        </div>
+        <h2>Hourly P&L Distribution</h2>
+        <div class="echart large" id="chart-hourly-box"></div>
     </section>
 
     <section class="chart-section">
         <h2>Hourly Activity Heatmap</h2>
-        <div class="chart-container">
-            <canvas id="chart-heatmap"></canvas>
-        </div>
+        <div class="echart medium" id="chart-heatmap"></div>
     </section>
 
     <section class="chart-section">
-        <h2>Cumulative Funding</h2>
-        <div class="chart-container large">
-            <canvas id="chart-funding"></canvas>
-        </div>
+        <h2>Funding</h2>
+        <div class="echart" id="chart-funding"></div>
     </section>
 
-    <script src="lib/chart.umd.min.js"></script>
-    <script src="lib/chartjs-adapter-date-fns.min.js"></script>
-    <script src="lib/hammer.min.js"></script>
-    <script src="lib/chartjs-plugin-zoom.min.js"></script>
-    <script src="lib/chartjs-chart-boxplot.min.js"></script>
+    <script src="lib/echarts.min.js"></script>
     <script src="lib/sql-wasm.js"></script>
     <script src="dashboard.js"></script>
 </body>

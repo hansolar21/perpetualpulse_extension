@@ -1,67 +1,49 @@
-// dashboard.js — Trade analytics dashboard for Perpetualpulse
-// Runs as an extension page with direct access to IndexedDB + sql.js
-
+// dashboard.js — Trade analytics dashboard (ECharts)
 (function () {
     "use strict";
 
     let _db = null;
-    const COLORS = {
-        green: "#10b981",
-        red: "#ef4444",
-        blue: "#3b82f6",
-        purple: "#8b5cf6",
-        amber: "#f59e0b",
-        cyan: "#06b6d4",
-        pink: "#ec4899",
-        lime: "#84cc16",
-        orange: "#f97316",
-        teal: "#14b8a6",
-        indigo: "#6366f1",
-        rose: "#f43f5e",
+    const charts = []; // for resize handling
+
+    const C = {
+        green: "#10b981", red: "#ef4444", blue: "#3b82f6", purple: "#8b5cf6",
+        amber: "#f59e0b", cyan: "#06b6d4", pink: "#ec4899", lime: "#84cc16",
+        orange: "#f97316", teal: "#14b8a6", indigo: "#6366f1", rose: "#f43f5e",
+        bg: "#0a0e17", bg2: "#111827", bg3: "#1a2235", border: "#1e2a3a",
+        text: "#e2e8f0", dim: "#8892a4",
     };
-    const PALETTE = Object.values(COLORS);
+    const PALETTE = [C.blue, C.green, C.purple, C.amber, C.cyan, C.pink, C.lime, C.orange, C.teal, C.indigo, C.rose, C.red];
 
-    // ---- Chart.js defaults ----
-    Chart.defaults.color = "#8892a4";
-    Chart.defaults.borderColor = "#1e2a3a";
-    Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-    Chart.defaults.font.size = 12;
-    Chart.defaults.plugins.legend.labels.boxWidth = 12;
-    Chart.defaults.plugins.legend.labels.padding = 16;
-    Chart.defaults.plugins.tooltip.backgroundColor = "#1a2235";
-    Chart.defaults.plugins.tooltip.borderColor = "#1e2a3a";
-    Chart.defaults.plugins.tooltip.borderWidth = 1;
-    Chart.defaults.plugins.tooltip.padding = 10;
-    Chart.defaults.plugins.tooltip.cornerRadius = 6;
-
-    // ---- Zoom/Pan config for time series ----
-    const zoomPanPlugin = {
-        zoom: {
-            wheel: { enabled: true, modifierKey: null },
-            pinch: { enabled: true },
-            drag: { enabled: true, modifierKey: "shift" },
-            mode: "x",
-        },
-        pan: {
-            enabled: true,
-            mode: "x",
-        },
-    };
-
-    // ---- IndexedDB ----
-    function openIDB() {
-        return new Promise((resolve, reject) => {
-            const req = indexedDB.open(DB_NAME, 1);
-            req.onupgradeneeded = () => {
-                if (!req.result.objectStoreNames.contains(DB_STORE)) {
-                    req.result.createObjectStore(DB_STORE);
-                }
-            };
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-        });
+    // ---- ECharts helpers ----
+    function makeChart(id) {
+        const el = document.getElementById(id);
+        const chart = echarts.init(el, null, { renderer: "canvas" });
+        charts.push(chart);
+        return chart;
     }
 
+    function dataZoomOpts(type = "slider") {
+        return [
+            { type: "inside", xAxisIndex: 0, filterMode: "none" },
+            { type: "slider", xAxisIndex: 0, height: 25, bottom: 8, borderColor: C.border,
+              backgroundColor: C.bg2, fillerColor: C.blue + "20",
+              dataBackground: { lineStyle: { color: C.dim }, areaStyle: { color: C.blue + "10" } },
+              textStyle: { color: C.dim, fontSize: 10 }, handleStyle: { color: C.blue } },
+        ];
+    }
+
+    function baseGrid(extra = {}) {
+        return { top: 40, right: 20, bottom: 60, left: 70, ...extra };
+    }
+
+    function tooltipBase() {
+        return {
+            trigger: "axis", backgroundColor: C.bg3, borderColor: C.border, borderWidth: 1,
+            textStyle: { color: C.text, fontSize: 12 },
+        };
+    }
+
+    // ---- DB ----
     function base64ToUint8(b64) {
         const binary = atob(b64);
         const u8 = new Uint8Array(binary.length);
@@ -70,13 +52,10 @@
     }
 
     async function loadDB() {
-        // Read from chrome.storage.local (shared across extension contexts)
         const result = await new Promise((resolve) => {
             chrome.storage.local.get("pp_trade_db_b64", (r) => resolve(r));
         });
-
         if (!result.pp_trade_db_b64) return null;
-
         const wasmUrl = chrome.runtime.getURL("lib/sql-wasm.wasm");
         const SQL = await initSqlJs({ locateFile: () => wasmUrl });
         return new SQL.Database(base64ToUint8(result.pp_trade_db_b64));
@@ -92,355 +71,181 @@
                 result[0].columns.forEach((col, i) => (obj[col] = row[i]));
                 return obj;
             });
-        } catch (e) {
-            console.error("Query error:", sql, e);
-            return [];
-        }
+        } catch (e) { console.error("Query error:", sql, e); return []; }
     }
 
-    // ---- Formatting ----
-    function fmt(n, decimals = 2) {
+    // ---- Format ----
+    function fmt(n, d = 2) {
         if (n == null || isNaN(n)) return "—";
-        const sign = n >= 0 ? "" : "-";
-        const abs = Math.abs(n);
-        if (abs >= 1e6) return sign + "$" + (abs / 1e6).toFixed(1) + "M";
-        if (abs >= 1e3) return sign + "$" + (abs / 1e3).toFixed(1) + "K";
-        return sign + "$" + abs.toFixed(decimals);
+        const sign = n < 0 ? "-" : "";
+        const a = Math.abs(n);
+        if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(1) + "M";
+        if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(1) + "K";
+        return sign + "$" + a.toFixed(d);
     }
+    function pnlClass(n) { return n > 0 ? "positive" : n < 0 ? "negative" : ""; }
 
-    function pnlClass(n) {
-        if (n > 0) return "positive";
-        if (n < 0) return "negative";
-        return "";
-    }
+    // ================ RENDERERS ================
 
-    // ---- Summary Cards ----
     function renderSummary() {
-        const totals = query(`
-            SELECT COUNT(*) as trades,
-                COALESCE(SUM(trade_value), 0) as volume,
-                COALESCE(SUM(COALESCE(closed_pnl, 0)), 0) as pnl,
-                COALESCE(SUM(fee), 0) as fees
-            FROM trades
-        `)[0] || {};
+        const t = query(`SELECT COUNT(*) as trades, COALESCE(SUM(trade_value),0) as volume,
+            COALESCE(SUM(COALESCE(closed_pnl,0)),0) as pnl, COALESCE(SUM(fee),0) as fees FROM trades`)[0] || {};
+        const f = query(`SELECT COALESCE(SUM(payment),0) as total FROM funding`)[0] || {};
+        const w = query(`SELECT COUNT(*) as total, SUM(CASE WHEN closed_pnl>0 THEN 1 ELSE 0 END) as wins
+            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0`)[0] || {};
 
-        const fundingTotal = query(`
-            SELECT COALESCE(SUM(payment), 0) as total FROM funding
-        `)[0] || {};
+        const funding = f.total || 0;
+        const net = (t.pnl || 0) - (t.fees || 0) + funding;
+        const winRate = w.total > 0 ? ((w.wins / w.total) * 100).toFixed(1) + "%" : "—";
 
-        const winData = query(`
-            SELECT COUNT(*) as total,
-                SUM(CASE WHEN closed_pnl > 0 THEN 1 ELSE 0 END) as wins
-            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
-        `)[0] || {};
-
-        const funding = fundingTotal.total || 0;
-        const net = (totals.pnl || 0) - (totals.fees || 0) + funding;
-        const winRate = winData.total > 0 ? ((winData.wins / winData.total) * 100).toFixed(1) + "%" : "—";
-
-        const set = (id, val, cls) => {
-            const el = document.getElementById(id);
-            el.textContent = val;
-            if (cls) el.className = "card-value " + cls;
-        };
-
-        set("stat-trades", (totals.trades || 0).toLocaleString());
-        set("stat-pnl", fmt(totals.pnl), pnlClass(totals.pnl));
-        set("stat-fees", fmt(totals.fees));
+        const set = (id, val, cls) => { const el = document.getElementById(id); el.textContent = val; if (cls) el.className = "card-value " + cls; };
+        set("stat-trades", (t.trades || 0).toLocaleString());
+        set("stat-pnl", fmt(t.pnl), pnlClass(t.pnl));
+        set("stat-fees", fmt(t.fees));
         set("stat-funding", fmt(funding), pnlClass(funding));
         set("stat-net", fmt(net), pnlClass(net));
-        set("stat-volume", fmt(totals.volume));
+        set("stat-volume", fmt(t.volume));
         set("stat-winrate", winRate);
 
-        // Status bar
         const range = query("SELECT MIN(date) as mn, MAX(date) as mx, COUNT(DISTINCT DATE(date)) as days FROM trades")[0] || {};
-        const fundingStr = funding !== 0 ? ` | funding: ${fmt(funding)}` : "";
         document.getElementById("status-text").textContent =
-            `${(totals.trades || 0).toLocaleString()} trades | ${range.days || 0} days | ${(range.mn || "").slice(0, 10)} → ${(range.mx || "").slice(0, 10)}${fundingStr}`;
+            `${(t.trades || 0).toLocaleString()} trades | ${range.days || 0} days | ${(range.mn || "").slice(0, 10)} → ${(range.mx || "").slice(0, 10)} | funding: ${fmt(funding)}`;
     }
 
-    // ---- Equity Curve ----
     function renderEquityCurve() {
-        const data = query(`
-            SELECT DATE(date) as day, SUM(COALESCE(closed_pnl, 0)) as pnl, SUM(fee) as fees
-            FROM trades GROUP BY day ORDER BY day
-        `);
+        const data = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees
+            FROM trades GROUP BY day ORDER BY day`);
+        const fd = query(`SELECT DATE(date) as day, SUM(payment) as funding FROM funding GROUP BY day`);
+        const fmap = {}; for (const r of fd) fmap[r.day] = r.funding;
 
-        // Get daily funding
-        const fundingData = query(`
-            SELECT DATE(date) as day, SUM(payment) as funding
-            FROM funding GROUP BY day ORDER BY day
-        `);
-        const fundingMap = {};
-        for (const f of fundingData) fundingMap[f.day] = f.funding;
-
-        let cumNet = 0;
-        const labels = [], netData = [];
-        for (const row of data) {
-            const dailyFunding = fundingMap[row.day] || 0;
-            cumNet += row.pnl - row.fees + dailyFunding;
-            labels.push(row.day);
-            netData.push(cumNet);
+        let cum = 0;
+        const days = [], vals = [];
+        for (const r of data) {
+            cum += r.pnl - r.fees + (fmap[r.day] || 0);
+            days.push(r.day);
+            vals.push(Math.round(cum * 100) / 100);
         }
 
-        new Chart(document.getElementById("chart-equity"), {
-            type: "line",
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: "Net P&L (incl. fees + funding)",
-                        data: netData,
-                        borderColor: COLORS.green,
-                        backgroundColor: COLORS.green + "15",
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 0,
-                        borderWidth: 2,
-                    },
-                ],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { intersect: false, mode: "index" },
-                scales: {
-                    x: { type: "time", time: { unit: "week" }, grid: { display: false } },
-                    y: {
-                        grid: { color: "#1e2a3a" },
-                        ticks: { callback: (v) => fmt(v) },
-                    },
-                },
-                plugins: {
-                    zoom: zoomPanPlugin,
-                    tooltip: {
-                        callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.raw)}` },
-                    },
-                },
-            },
+        makeChart("chart-equity").setOption({
+            tooltip: { ...tooltipBase(), formatter: (p) => `${p[0].axisValue}<br/>Net P&L: <b>${fmt(p[0].value)}</b>` },
+            grid: baseGrid(),
+            xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+            dataZoom: dataZoomOpts(),
+            series: [{
+                type: "line", data: vals, smooth: 0.3, symbol: "none", lineStyle: { color: C.green, width: 2 },
+                areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + "30" }, { offset: 1, color: C.green + "05" }]) },
+            }],
         });
     }
 
-    // ---- Daily P&L Bar ----
     function renderDailyPnL() {
-        const data = query(`
-            SELECT DATE(date) as day,
-                SUM(COALESCE(closed_pnl, 0)) as pnl,
-                SUM(fee) as fees
-            FROM trades GROUP BY day ORDER BY day
-        `);
+        const data = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees
+            FROM trades GROUP BY day ORDER BY day`);
+        const fd = query(`SELECT DATE(date) as day, SUM(payment) as funding FROM funding GROUP BY day`);
+        const fmap = {}; for (const r of fd) fmap[r.day] = r.funding;
 
-        const labels = data.map((r) => r.day);
-        const netPnl = data.map((r) => r.pnl - r.fees);
-        const bgColors = netPnl.map((v) => (v >= 0 ? COLORS.green + "cc" : COLORS.red + "cc"));
+        const days = [], vals = [], colors = [];
+        for (const r of data) {
+            const net = r.pnl - r.fees + (fmap[r.day] || 0);
+            days.push(r.day);
+            vals.push(Math.round(net * 100) / 100);
+            colors.push(net >= 0 ? C.green : C.red);
+        }
 
-        new Chart(document.getElementById("chart-daily-pnl"), {
-            type: "bar",
-            data: {
-                labels,
-                datasets: [{
-                    label: "Daily Net P&L",
-                    data: netPnl,
-                    backgroundColor: bgColors,
-                    borderRadius: 2,
-                }],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: { type: "time", time: { unit: "week" }, grid: { display: false } },
-                    y: {
-                        grid: { color: "#1e2a3a" },
-                        ticks: { callback: (v) => fmt(v) },
-                    },
-                },
-                plugins: {
-                    zoom: zoomPanPlugin,
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: (ctx) => fmt(ctx.raw) } },
-                },
-            },
+        makeChart("chart-daily-pnl").setOption({
+            tooltip: { ...tooltipBase(), formatter: (p) => `${p[0].axisValue}<br/>Daily P&L: <b>${fmt(p[0].value)}</b>` },
+            grid: baseGrid(),
+            xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+            dataZoom: dataZoomOpts(),
+            series: [{ type: "bar", data: vals, itemStyle: { color: (p) => colors[p.dataIndex] }, barMaxWidth: 8 }],
         });
     }
 
-    // ---- P&L by Market ----
     function renderMarketPnL() {
-        const data = query(`
-            SELECT market, SUM(COALESCE(closed_pnl, 0)) - SUM(fee) as net_pnl
-            FROM trades GROUP BY market ORDER BY net_pnl DESC
-        `);
+        const data = query(`SELECT market, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net_pnl
+            FROM trades GROUP BY market ORDER BY net_pnl DESC`);
 
-        new Chart(document.getElementById("chart-market-pnl"), {
-            type: "bar",
-            data: {
-                labels: data.map((r) => r.market),
-                datasets: [{
-                    label: "Net P&L",
-                    data: data.map((r) => r.net_pnl),
-                    backgroundColor: data.map((r) => (r.net_pnl >= 0 ? COLORS.green + "cc" : COLORS.red + "cc")),
-                    borderRadius: 4,
-                }],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                indexAxis: "y",
-                scales: {
-                    x: { grid: { color: "#1e2a3a" }, ticks: { callback: (v) => fmt(v) } },
-                    y: { grid: { display: false } },
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: (ctx) => fmt(ctx.raw) } },
-                },
-            },
+        makeChart("chart-market-pnl").setOption({
+            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p) => `${p[0].name}: <b>${fmt(p[0].value)}</b>` },
+            grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
+            xAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
+            series: [{
+                type: "bar", data: data.map((r) => r.net_pnl).reverse(),
+                itemStyle: { color: (p) => p.value >= 0 ? C.green : C.red, borderRadius: [0, 3, 3, 0] },
+                barMaxWidth: 14,
+            }],
         });
     }
 
-    // ---- Volume by Market ----
     function renderMarketVolume() {
-        const data = query(`
-            SELECT market, SUM(trade_value) as volume
-            FROM trades GROUP BY market ORDER BY volume DESC LIMIT 15
-        `);
+        const data = query(`SELECT market, SUM(trade_value) as volume FROM trades GROUP BY market ORDER BY volume DESC LIMIT 15`);
 
-        new Chart(document.getElementById("chart-market-vol"), {
-            type: "bar",
-            data: {
-                labels: data.map((r) => r.market),
-                datasets: [{
-                    label: "Volume",
-                    data: data.map((r) => r.volume),
-                    backgroundColor: PALETTE.slice(0, data.length).map((c) => c + "cc"),
-                    borderRadius: 4,
-                }],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                indexAxis: "y",
-                scales: {
-                    x: { grid: { color: "#1e2a3a" }, ticks: { callback: (v) => fmt(v) } },
-                    y: { grid: { display: false } },
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: (ctx) => fmt(ctx.raw) } },
-                },
-            },
+        makeChart("chart-market-vol").setOption({
+            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p) => `${p[0].name}: <b>${fmt(p[0].value)}</b>` },
+            grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
+            xAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
+            series: [{
+                type: "bar", data: data.map((r) => r.volume).reverse(),
+                itemStyle: { color: (p) => PALETTE[p.dataIndex % PALETTE.length], borderRadius: [0, 3, 3, 0] },
+                barMaxWidth: 14,
+            }],
         });
     }
 
-    // ---- Maker vs Taker ----
     function renderMakerTaker() {
-        const data = query(`
-            SELECT role, COUNT(*) as cnt, SUM(trade_value) as volume
-            FROM trades WHERE role IS NOT NULL GROUP BY role
-        `);
+        const data = query(`SELECT role, COUNT(*) as cnt, SUM(trade_value) as volume
+            FROM trades WHERE role IS NOT NULL GROUP BY role`);
 
-        new Chart(document.getElementById("chart-maker-taker"), {
-            type: "doughnut",
-            data: {
-                labels: data.map((r) => `${r.role} (${r.cnt.toLocaleString()})`),
-                datasets: [{
-                    data: data.map((r) => r.volume),
-                    backgroundColor: [COLORS.blue + "cc", COLORS.amber + "cc", COLORS.purple + "cc"],
-                    borderColor: "#111827",
-                    borderWidth: 2,
-                }],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => {
-                                const r = data[ctx.dataIndex];
-                                return `${r.role}: ${fmt(r.volume)} (${r.cnt.toLocaleString()} fills)`;
-                            },
-                        },
-                    },
-                },
-            },
+        makeChart("chart-maker-taker").setOption({
+            tooltip: { trigger: "item", backgroundColor: C.bg3, borderColor: C.border, textStyle: { color: C.text },
+                formatter: (p) => `${p.name}<br/>Volume: <b>${fmt(p.value)}</b><br/>Fills: ${data[p.dataIndex].cnt.toLocaleString()}` },
+            series: [{
+                type: "pie", radius: ["40%", "70%"], center: ["50%", "50%"],
+                data: data.map((r, i) => ({ name: r.role, value: r.volume, itemStyle: { color: [C.blue, C.amber, C.purple][i] } })),
+                label: { color: C.text, formatter: "{b}\n{d}%" },
+                emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.5)" } },
+            }],
         });
     }
 
-    // ---- Win Rate by Market ----
     function renderWinRate() {
-        const data = query(`
-            SELECT market,
-                COUNT(*) as total,
-                SUM(CASE WHEN closed_pnl > 0 THEN 1 ELSE 0 END) as wins,
-                ROUND(100.0 * SUM(CASE WHEN closed_pnl > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as win_rate
-            FROM trades
-            WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
-            GROUP BY market HAVING total >= 10
-            ORDER BY win_rate DESC
-        `);
+        const data = query(`SELECT market, COUNT(*) as total,
+            SUM(CASE WHEN closed_pnl>0 THEN 1 ELSE 0 END) as wins,
+            ROUND(100.0*SUM(CASE WHEN closed_pnl>0 THEN 1 ELSE 0 END)/COUNT(*),1) as win_rate
+            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0
+            GROUP BY market HAVING total>=10 ORDER BY win_rate DESC`);
 
-        new Chart(document.getElementById("chart-winrate"), {
-            type: "bar",
-            data: {
-                labels: data.map((r) => r.market),
-                datasets: [{
-                    label: "Win Rate %",
-                    data: data.map((r) => r.win_rate),
-                    backgroundColor: data.map((r) =>
-                        r.win_rate >= 50 ? COLORS.green + "cc" : COLORS.red + "cc"
-                    ),
-                    borderRadius: 4,
-                }],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                indexAxis: "y",
-                scales: {
-                    x: { min: 0, max: 100, grid: { color: "#1e2a3a" }, ticks: { callback: (v) => v + "%" } },
-                    y: { grid: { display: false } },
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => {
-                                const r = data[ctx.dataIndex];
-                                return `${r.win_rate}% (${r.wins}/${r.total})`;
-                            },
-                        },
-                    },
-                },
-            },
+        makeChart("chart-winrate").setOption({
+            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" },
+                formatter: (p) => { const r = data[data.length - 1 - p[0].dataIndex]; return `${r.market}: <b>${r.win_rate}%</b> (${r.wins}/${r.total})`; } },
+            grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
+            xAxis: { type: "value", min: 0, max: 100, axisLabel: { color: C.dim, formatter: "{value}%" }, splitLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
+            series: [{
+                type: "bar", data: data.map((r) => r.win_rate).reverse(),
+                itemStyle: { color: (p) => p.value >= 50 ? C.green : C.red, borderRadius: [0, 3, 3, 0] },
+                barMaxWidth: 14, label: { show: true, position: "right", color: C.dim, fontSize: 10, formatter: "{c}%" },
+            }],
         });
     }
 
-    // ---- Best & Worst Trades ----
     function renderBestWorst() {
-        const best = query(`
-            SELECT market, side, date, trade_value, closed_pnl
-            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
-            ORDER BY closed_pnl DESC LIMIT 15
-        `);
-        const worst = query(`
-            SELECT market, side, date, trade_value, closed_pnl
-            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
-            ORDER BY closed_pnl ASC LIMIT 15
-        `);
+        const best = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades
+            WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl DESC LIMIT 15`);
+        const worst = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades
+            WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl ASC LIMIT 15`);
 
         const fillTable = (id, rows) => {
             const tbody = document.querySelector(`#${id} tbody`);
             tbody.innerHTML = "";
             for (const r of rows) {
                 const tr = document.createElement("tr");
-                tr.innerHTML = `
-                    <td>${r.market}</td>
-                    <td>${r.side}</td>
-                    <td>${(r.date || "").slice(0, 10)}</td>
-                    <td>${fmt(r.trade_value)}</td>
-                    <td class="${pnlClass(r.closed_pnl)}">${fmt(r.closed_pnl)}</td>
-                `;
+                tr.innerHTML = `<td>${r.market}</td><td>${r.side}</td><td>${(r.date || "").slice(0, 10)}</td>
+                    <td>${fmt(r.trade_value)}</td><td class="${pnlClass(r.closed_pnl)}">${fmt(r.closed_pnl)}</td>`;
                 tbody.appendChild(tr);
             }
         };
@@ -448,300 +253,166 @@
         fillTable("table-worst", worst);
     }
 
-    // ---- Monthly Table ----
     function renderMonthlyTable() {
-        const data = query(`
-            SELECT strftime('%Y-%m', date) as month,
-                COUNT(*) as trades,
-                SUM(trade_value) as volume,
-                SUM(COALESCE(closed_pnl, 0)) as pnl,
-                SUM(fee) as fees,
-                SUM(CASE WHEN role='Maker' THEN 1 ELSE 0 END) as maker,
-                COUNT(*) as total
-            FROM trades GROUP BY month ORDER BY month DESC
-        `);
-
-        // Monthly funding
-        const fundingData = query(`
-            SELECT strftime('%Y-%m', date) as month, SUM(payment) as funding
-            FROM funding GROUP BY month
-        `);
-        const fundingMap = {};
-        for (const f of fundingData) fundingMap[f.month] = f.funding;
+        const data = query(`SELECT strftime('%Y-%m', date) as month, COUNT(*) as trades,
+            SUM(trade_value) as volume, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees,
+            SUM(CASE WHEN role='Maker' THEN 1 ELSE 0 END) as maker, COUNT(*) as total
+            FROM trades GROUP BY month ORDER BY month DESC`);
+        const fd = query(`SELECT strftime('%Y-%m', date) as month, SUM(payment) as funding FROM funding GROUP BY month`);
+        const fmap = {}; for (const r of fd) fmap[r.month] = r.funding;
 
         const tbody = document.querySelector("#table-monthly tbody");
         tbody.innerHTML = "";
         for (const r of data) {
-            const funding = fundingMap[r.month] || 0;
+            const funding = fmap[r.month] || 0;
             const net = r.pnl - r.fees + funding;
             const makerPct = r.total > 0 ? ((r.maker / r.total) * 100).toFixed(1) + "%" : "—";
             const tr = document.createElement("tr");
-            tr.innerHTML = `
-                <td>${r.month}</td>
-                <td>${r.trades.toLocaleString()}</td>
-                <td>${fmt(r.volume)}</td>
-                <td class="${pnlClass(r.pnl)}">${fmt(r.pnl)}</td>
-                <td>${fmt(r.fees)}</td>
-                <td class="${pnlClass(funding)}">${fmt(funding)}</td>
-                <td class="${pnlClass(net)}">${fmt(net)}</td>
-                <td>${makerPct}</td>
-            `;
+            tr.innerHTML = `<td>${r.month}</td><td>${r.trades.toLocaleString()}</td><td>${fmt(r.volume)}</td>
+                <td class="${pnlClass(r.pnl)}">${fmt(r.pnl)}</td><td>${fmt(r.fees)}</td>
+                <td class="${pnlClass(funding)}">${fmt(funding)}</td><td class="${pnlClass(net)}">${fmt(net)}</td><td>${makerPct}</td>`;
             tbody.appendChild(tr);
         }
     }
 
-    // ---- Hourly P&L Box Plot ----
     function renderHourlyBox() {
-        // Get per-trade PnL grouped by hour
-        const raw = query(`
-            SELECT CAST(strftime('%H', date) AS INTEGER) as hour, closed_pnl
-            FROM trades
-            WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
-            ORDER BY hour
-        `);
+        const raw = query(`SELECT CAST(strftime('%H', date) AS INTEGER) as hour, closed_pnl
+            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY hour`);
 
-        // Group by hour
         const byHour = {};
         for (let h = 0; h < 24; h++) byHour[h] = [];
-        for (const r of raw) {
-            byHour[r.hour].push(r.closed_pnl);
-        }
+        for (const r of raw) byHour[r.hour].push(r.closed_pnl);
 
-        // Build box plot data + scatter overlay
-        const labels = Array.from({ length: 24 }, (_, h) => {
-            const kst = (h + 9) % 24;
-            return `${String(h).padStart(2, "0")} UTC\n${String(kst).padStart(2, "0")} KST`;
-        });
-
-        // Box plot dataset
-        const boxData = labels.map((_, h) => {
-            const vals = byHour[h];
-            if (vals.length === 0) return null;
-            // Clamp outliers for box plot visualization (keep scatter for full range)
-            return vals;
-        });
-
-        // Scatter: sample up to 200 points per hour for visibility
+        // Compute box plot stats
+        const boxData = [];
         const scatterData = [];
+        const hourLabels = [];
+        const hourSums = [];
+
         for (let h = 0; h < 24; h++) {
-            let vals = byHour[h];
-            // Sample if too many
-            if (vals.length > 200) {
-                const step = Math.ceil(vals.length / 200);
-                vals = vals.filter((_, i) => i % step === 0);
+            const kst = (h + 9) % 24;
+            hourLabels.push(`${String(h).padStart(2, "0")} UTC / ${String(kst).padStart(2, "0")} KST`);
+
+            const vals = byHour[h].slice().sort((a, b) => a - b);
+            hourSums.push(vals.reduce((s, v) => s + v, 0));
+
+            if (vals.length === 0) { boxData.push([0, 0, 0, 0, 0]); continue; }
+
+            const q1Idx = Math.floor(vals.length * 0.25);
+            const q2Idx = Math.floor(vals.length * 0.5);
+            const q3Idx = Math.floor(vals.length * 0.75);
+            const iqr = vals[q3Idx] - vals[q1Idx];
+            const lo = Math.max(vals[0], vals[q1Idx] - 1.5 * iqr);
+            const hi = Math.min(vals[vals.length - 1], vals[q3Idx] + 1.5 * iqr);
+
+            // ECharts boxplot: [min, Q1, median, Q3, max]
+            boxData.push([lo, vals[q1Idx], vals[q2Idx], vals[q3Idx], hi]);
+
+            // Sample scatter points
+            let sampled = vals;
+            if (sampled.length > 150) {
+                const step = Math.ceil(sampled.length / 150);
+                sampled = sampled.filter((_, i) => i % step === 0);
             }
-            for (const v of vals) {
-                scatterData.push({ x: h, y: v });
+            for (const v of sampled) {
+                scatterData.push([h + (Math.random() - 0.5) * 0.3, v]);
             }
         }
 
-        // Compute aggregate for coloring
-        const hourSums = labels.map((_, h) => byHour[h].reduce((s, v) => s + v, 0));
-
-        new Chart(document.getElementById("chart-hourly-box"), {
-            type: "boxplot",
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: "P&L Distribution",
-                        data: boxData,
-                        backgroundColor: hourSums.map((s) =>
-                            s >= 0 ? COLORS.green + "40" : COLORS.red + "40"
-                        ),
-                        borderColor: hourSums.map((s) =>
-                            s >= 0 ? COLORS.green + "aa" : COLORS.red + "aa"
-                        ),
+        makeChart("chart-hourly-box").setOption({
+            tooltip: { trigger: "item", backgroundColor: C.bg3, borderColor: C.border, textStyle: { color: C.text },
+                formatter: (p) => {
+                    if (p.seriesType === "scatter") return `Trade: <b>${fmt(p.value[1])}</b>`;
+                    const d = p.value;
+                    return `${p.name}<br/>Max: ${fmt(d[5])}<br/>Q3: ${fmt(d[4])}<br/>Median: ${fmt(d[3])}<br/>Q1: ${fmt(d[2])}<br/>Min: ${fmt(d[1])}<br/>Net: <b>${fmt(hourSums[p.dataIndex])}</b>`;
+                },
+            },
+            grid: baseGrid({ bottom: 50 }),
+            xAxis: { type: "category", data: hourLabels, axisLabel: { color: C.dim, fontSize: 9, rotate: 45 }, axisLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } },
+                min: -5000, max: 5000 },
+            dataZoom: [{ type: "inside", yAxisIndex: 0 }],
+            series: [
+                {
+                    type: "boxplot", data: boxData,
+                    itemStyle: {
+                        color: (p) => hourSums[p.dataIndex] >= 0 ? C.green + "25" : C.red + "25",
+                        borderColor: (p) => hourSums[p.dataIndex] >= 0 ? C.green : C.red,
                         borderWidth: 1.5,
-                        outlierRadius: 0, // hide outlier dots (we use scatter)
-                        itemRadius: 0,
-                        medianColor: "#e2e8f0",
-                        meanRadius: 0,
                     },
-                    {
-                        type: "scatter",
-                        label: "Individual Trades",
-                        data: scatterData,
-                        backgroundColor: scatterData.map((d) =>
-                            d.y >= 0 ? COLORS.green + "30" : COLORS.red + "30"
-                        ),
-                        pointRadius: 1.5,
-                        pointHoverRadius: 4,
-                    },
-                ],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        grid: { display: false },
-                        ticks: {
-                            maxRotation: 0,
-                            font: { size: 10 },
-                        },
-                    },
-                    y: {
-                        grid: { color: "#1e2a3a" },
-                        ticks: { callback: (v) => fmt(v) },
-                        // Clamp y-axis to show the interesting range
-                        suggestedMin: -5000,
-                        suggestedMax: 5000,
-                    },
+                    boxWidth: ["40%", "60%"],
                 },
-                plugins: {
-                    zoom: zoomPanPlugin,
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => {
-                                if (ctx.dataset.type === "scatter") {
-                                    return `Trade: ${fmt(ctx.raw.y)}`;
-                                }
-                                return ctx.dataset.label;
-                            },
-                        },
-                    },
+                {
+                    type: "scatter", data: scatterData,
+                    symbolSize: 3,
+                    itemStyle: { color: (p) => p.value[1] >= 0 ? C.green + "50" : C.red + "50" },
                 },
-            },
+            ],
         });
     }
 
-    // ---- Hourly Heatmap ----
     function renderHeatmap() {
-        const data = query(`
-            SELECT CAST(strftime('%w', date) AS INTEGER) as dow,
-                CAST(strftime('%H', date) AS INTEGER) as hour,
-                COUNT(*) as cnt
-            FROM trades GROUP BY dow, hour
-        `);
+        const data = query(`SELECT CAST(strftime('%w', date) AS INTEGER) as dow,
+            CAST(strftime('%H', date) AS INTEGER) as hour, COUNT(*) as cnt
+            FROM trades GROUP BY dow, hour`);
 
         const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const hours = Array.from({ length: 24 }, (_, i) => i);
-        const matrix = Array.from({ length: 7 }, () => new Array(24).fill(0));
+        const heatData = [];
         let maxCnt = 1;
+        for (const r of data) { maxCnt = Math.max(maxCnt, r.cnt); heatData.push([r.hour, r.dow, r.cnt]); }
 
-        for (const r of data) {
-            matrix[r.dow][r.hour] = r.cnt;
-            if (r.cnt > maxCnt) maxCnt = r.cnt;
-        }
-
-        // Use a bar chart with stacked — each hour gets 7 segments
-        const datasets = days.map((day, di) => ({
-            label: day,
-            data: hours.map((h) => matrix[di][h]),
-            backgroundColor: hours.map((h) => {
-                const intensity = matrix[di][h] / maxCnt;
-                const alpha = Math.max(0.05, intensity);
-                return `rgba(59, 130, 246, ${alpha})`;
-            }),
-        }));
-
-        new Chart(document.getElementById("chart-heatmap"), {
-            type: "bar",
-            data: {
-                labels: hours.map((h) => h + ":00"),
-                datasets,
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: { stacked: true, grid: { display: false } },
-                    y: { stacked: true, grid: { color: "#1e2a3a" } },
-                },
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            title: (items) => `${items[0].label} UTC`,
-                            label: (ctx) => `${ctx.dataset.label}: ${ctx.raw} trades`,
-                        },
-                    },
-                },
-            },
+        makeChart("chart-heatmap").setOption({
+            tooltip: { backgroundColor: C.bg3, borderColor: C.border, textStyle: { color: C.text },
+                formatter: (p) => `${days[p.value[1]]} ${String(p.value[0]).padStart(2, "0")}:00 UTC<br/>${p.value[2]} trades` },
+            grid: { top: 10, right: 80, bottom: 30, left: 60 },
+            xAxis: { type: "category", data: Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")),
+                axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } }, splitArea: { show: true, areaStyle: { color: [C.bg2, C.bg] } } },
+            yAxis: { type: "category", data: days, axisLabel: { color: C.text }, axisLine: { show: false } },
+            visualMap: { min: 0, max: maxCnt, calculable: true, orient: "vertical", right: 10, top: 10, bottom: 30,
+                inRange: { color: [C.bg2, C.blue + "40", C.blue + "80", C.blue] },
+                textStyle: { color: C.dim } },
+            series: [{ type: "heatmap", data: heatData, emphasis: { itemStyle: { shadowBlur: 5, shadowColor: C.blue } } }],
         });
     }
 
-    // ---- Cumulative Funding ----
     function renderFunding() {
-        const data = query(`
-            SELECT DATE(date) as day, SUM(payment) as payment
-            FROM funding GROUP BY day ORDER BY day
-        `);
-
+        const data = query(`SELECT DATE(date) as day, SUM(payment) as payment FROM funding GROUP BY day ORDER BY day`);
         if (data.length === 0) {
-            document.getElementById("chart-funding").parentElement.innerHTML =
-                '<p style="color:#8892a4;text-align:center;padding:40px">No funding data available</p>';
+            document.getElementById("chart-funding").innerHTML = '<p style="color:#8892a4;text-align:center;padding:60px">No funding data</p>';
             return;
         }
 
         let cum = 0;
-        const labels = [], cumData = [], dailyData = [], dailyColors = [];
+        const days = [], cumVals = [], dailyVals = [], dailyColors = [];
         for (const r of data) {
             cum += r.payment;
-            labels.push(r.day);
-            cumData.push(cum);
-            dailyData.push(r.payment);
-            dailyColors.push(r.payment >= 0 ? COLORS.green + "cc" : COLORS.red + "cc");
+            days.push(r.day);
+            cumVals.push(Math.round(cum * 100) / 100);
+            dailyVals.push(Math.round(r.payment * 100) / 100);
+            dailyColors.push(r.payment >= 0 ? C.green : C.red);
         }
 
-        new Chart(document.getElementById("chart-funding"), {
-            type: "bar",
-            data: {
-                labels,
-                datasets: [
-                    {
-                        type: "line",
-                        label: "Cumulative Funding",
-                        data: cumData,
-                        borderColor: COLORS.purple,
-                        backgroundColor: COLORS.purple + "20",
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 0,
-                        borderWidth: 2,
-                        yAxisID: "y",
-                        order: 0,
-                    },
-                    {
-                        type: "bar",
-                        label: "Daily Funding",
-                        data: dailyData,
-                        backgroundColor: dailyColors,
-                        borderRadius: 1,
-                        yAxisID: "y1",
-                        order: 1,
-                    },
-                ],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { intersect: false, mode: "index" },
-                scales: {
-                    x: { type: "time", time: { unit: "week" }, grid: { display: false } },
-                    y: {
-                        position: "left",
-                        grid: { color: "#1e2a3a" },
-                        ticks: { callback: (v) => fmt(v) },
-                        title: { display: true, text: "Cumulative", color: COLORS.purple },
-                    },
-                    y1: {
-                        position: "right",
-                        grid: { display: false },
-                        ticks: { callback: (v) => fmt(v) },
-                        title: { display: true, text: "Daily", color: "#8892a4" },
-                    },
-                },
-                plugins: {
-                    zoom: zoomPanPlugin,
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.raw)}`,
-                        },
-                    },
-                },
-            },
+        makeChart("chart-funding").setOption({
+            tooltip: { ...tooltipBase(), formatter: (p) => {
+                let s = p[0].axisValue;
+                for (const item of p) s += `<br/>${item.seriesName}: <b>${fmt(item.value)}</b>`;
+                return s;
+            }},
+            legend: { data: ["Cumulative", "Daily"], textStyle: { color: C.dim }, top: 5 },
+            grid: baseGrid({ right: 70 }),
+            xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
+            yAxis: [
+                { type: "value", name: "Cumulative", nameTextStyle: { color: C.purple }, axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+                { type: "value", name: "Daily", nameTextStyle: { color: C.dim }, axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { show: false } },
+            ],
+            dataZoom: dataZoomOpts(),
+            series: [
+                { name: "Cumulative", type: "line", data: cumVals, smooth: 0.3, symbol: "none", yAxisIndex: 0,
+                    lineStyle: { color: C.purple, width: 2 },
+                    areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.purple + "30" }, { offset: 1, color: C.purple + "05" }]) } },
+                { name: "Daily", type: "bar", data: dailyVals, yAxisIndex: 1,
+                    itemStyle: { color: (p) => dailyColors[p.dataIndex] }, barMaxWidth: 6 },
+            ],
         });
     }
 
@@ -750,11 +421,9 @@
         try {
             _db = await loadDB();
             if (!_db) {
-                document.getElementById("status-text").textContent =
-                    "No trade data. Open app.lighter.xyz first to sync.";
+                document.getElementById("status-text").textContent = "No trade data. Open app.lighter.xyz first to sync.";
                 return;
             }
-
             renderSummary();
             renderEquityCurve();
             renderDailyPnL();
@@ -773,16 +442,14 @@
         }
     }
 
+    // Resize all charts
+    window.addEventListener("resize", () => { for (const c of charts) c.resize(); });
+
     // Sync button
     document.getElementById("btn-refresh").addEventListener("click", () => {
-        // Open Lighter in background to trigger sync, then reload
         chrome.tabs.create({ url: "https://app.lighter.xyz/trade/BTC", active: false }, (tab) => {
             document.getElementById("status-text").textContent = "Syncing... (opened Lighter tab)";
-            // Wait and reload after sync
-            setTimeout(() => {
-                chrome.tabs.remove(tab.id);
-                location.reload();
-            }, 30000);
+            setTimeout(() => { chrome.tabs.remove(tab.id); location.reload(); }, 30000);
         });
     });
 

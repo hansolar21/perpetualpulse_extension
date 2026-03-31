@@ -114,8 +114,9 @@ header h1 {
     letter-spacing: 0.04em;
 }
 
-.chart-container { position: relative; width: 100%; height: 300px; }
-.chart-container.large { height: 400px; }
+.echart { width: 100%; height: 420px; }
+.echart.medium { height: 350px; }
+.echart.large { height: 500px; }
 
 .two-col {
     display: grid;
