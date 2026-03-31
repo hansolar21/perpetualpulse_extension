@@ -320,7 +320,9 @@
 
             if (qStartUTC.getTime() > endDate.getTime()) break;
 
-            ranges.push([qStartUTC.getTime(), Math.min(qEndUTC.getTime(), endDate.getTime())]);
+            // Use actual startDate for first range (don't go before account creation)
+            const effectiveStart = Math.max(qStartUTC.getTime(), startDate.getTime());
+            ranges.push([effectiveStart, Math.min(qEndUTC.getTime(), endDate.getTime())]);
 
             // Advance to next quarter
             month += 3;
@@ -342,7 +344,8 @@
             const mEndUTC = new Date(Date.UTC(year, month + 1, 1) - KST_OFFSET_MS - 1);
 
             if (mStartUTC.getTime() > endDate.getTime()) break;
-            ranges.push([mStartUTC.getTime(), Math.min(mEndUTC.getTime(), endDate.getTime())]);
+            const effectiveStart = Math.max(mStartUTC.getTime(), startDate.getTime());
+            ranges.push([effectiveStart, Math.min(mEndUTC.getTime(), endDate.getTime())]);
 
             month++;
             if (month >= 12) { month = 0; year++; }
