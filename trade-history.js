@@ -300,7 +300,14 @@
         _syncing = true;
 
         try {
-            const auth = await getAuth();
+            // Retry auth up to 6 times (30s total) — page needs time to make API calls
+            let auth = { token: null, accountIndex: null };
+            for (let attempt = 0; attempt < 6; attempt++) {
+                auth = await getAuth();
+                if (auth.token) break;
+                console.log(`[Perpetualpulse] Waiting for auth token (attempt ${attempt + 1}/6)...`);
+                await new Promise((r) => setTimeout(r, 5000));
+            }
             if (!auth.token) {
                 console.log("[Perpetualpulse] Not logged in, skipping trade sync");
                 return;
