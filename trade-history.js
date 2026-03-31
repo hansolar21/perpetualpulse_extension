@@ -321,6 +321,117 @@
         return added;
     }
 
+    // ---------- FIFO PnL Reconstruction ----------
+    function reconstructPnL() {
+        if (!_db) return 0;
+
+        // Check if there are any NULL pnl trades to reconstruct
+        const nullCount = _db.exec("SELECT COUNT(*) FROM trades WHERE closed_pnl IS NULL")[0].values[0][0];
+        if (nullCount === 0) return 0;
+
+        console.log(`[Perpetualpulse] Reconstructing PnL for ${nullCount} trades via FIFO...`);
+
+        // Load all trades ordered by date
+        const rows = _db.exec(`
+            SELECT rowid, market, side, date, size, price, closed_pnl
+            FROM trades ORDER BY date ASC
+        `);
+        if (!rows.length) return 0;
+
+        const trades = rows[0].values;
+        const positions = {}; // market -> { direction, fills: [{size, price}] }
+
+        const getPos = (market) => {
+            if (!positions[market]) positions[market] = { direction: null, fills: [] };
+            return positions[market];
+        };
+
+        const closeFIFO = (pos, size, exitPrice) => {
+            let remaining = size;
+            let realized = 0;
+            while (remaining > 1e-12 && pos.fills.length > 0) {
+                const oldest = pos.fills[0];
+                const qty = Math.min(remaining, oldest.size);
+                if (pos.direction === "long") {
+                    realized += qty * (exitPrice - oldest.price);
+                } else {
+                    realized += qty * (oldest.price - exitPrice);
+                }
+                oldest.size -= qty;
+                remaining -= qty;
+                if (oldest.size <= 1e-12) pos.fills.shift();
+            }
+            if (pos.fills.length === 0) pos.direction = null;
+            return realized;
+        };
+
+        // Classify side
+        const classifyOld = (side, pos) => {
+            if (side === "Long") return (!pos.direction || pos.direction === "long") ? "open_long" : "close_short";
+            if (side === "Short") return (!pos.direction || pos.direction === "short") ? "open_short" : "close_long";
+            return null;
+        };
+
+        const classifyNew = (side) => {
+            const map = {
+                "Open Long": "open_long", "Open Short": "open_short",
+                "Close Long": "close_long", "Close Short": "close_short",
+                "Long > Short": "flip_to_short", "Short > Long": "flip_to_long",
+                "Buy": "open_long", "Sell": "close_long",
+            };
+            return map[side] || null;
+        };
+
+        const updates = []; // [rowid, pnl]
+
+        for (const [rowid, market, side, date, size, price, closedPnl] of trades) {
+            const pos = getPos(market);
+            const isOldFormat = side === "Long" || side === "Short";
+            const action = isOldFormat ? classifyOld(side, pos) : classifyNew(side);
+
+            let realized = 0;
+
+            if (action === "open_long" || action === "open_short") {
+                const dir = action === "open_long" ? "long" : "short";
+                if (!pos.direction) pos.direction = dir;
+                pos.fills.push({ size, price });
+            } else if (action === "close_long" && pos.direction === "long") {
+                realized = closeFIFO(pos, size, price);
+            } else if (action === "close_short" && pos.direction === "short") {
+                realized = closeFIFO(pos, size, price);
+            } else if (action === "flip_to_short" && pos.direction === "long") {
+                const closeSize = Math.min(size, pos.fills.reduce((s, f) => s + f.size, 0));
+                realized = closeFIFO(pos, closeSize, price);
+                const rem = size - closeSize;
+                if (rem > 1e-12) { pos.direction = "short"; pos.fills.push({ size: rem, price }); }
+                else if (!pos.fills.length) pos.direction = "short";
+            } else if (action === "flip_to_long" && pos.direction === "short") {
+                const closeSize = Math.min(size, pos.fills.reduce((s, f) => s + f.size, 0));
+                realized = closeFIFO(pos, closeSize, price);
+                const rem = size - closeSize;
+                if (rem > 1e-12) { pos.direction = "long"; pos.fills.push({ size: rem, price }); }
+                else if (!pos.fills.length) pos.direction = "long";
+            }
+
+            // Only update rows that have NULL pnl and we computed something
+            if (closedPnl === null && Math.abs(realized) > 0.001) {
+                updates.push([rowid, Math.round(realized * 1e6) / 1e6]);
+            }
+        }
+
+        // Batch update
+        if (updates.length > 0) {
+            const stmt = _db.prepare("UPDATE trades SET closed_pnl = ? WHERE rowid = ?");
+            for (const [rowid, pnl] of updates) {
+                stmt.run([pnl, rowid]);
+            }
+            stmt.free();
+            console.log(`[Perpetualpulse] Reconstructed PnL for ${updates.length} trades`);
+        }
+
+        return updates.length;
+    }
+
     // ---------- Sync Logic ----------
     function getQuarterRanges(startDate, endDate) {
         // Lighter export API requires KST calendar-quarter-aligned boundaries
@@ -460,6 +571,11 @@
                     // Funding export may fail for some ranges
                 }
                 await new Promise((r) => setTimeout(r, 300));
+            }
+
+            // Reconstruct PnL for trades missing closed_pnl (pre-May 2025)
+            if (totalAdded > 0 || !lastDate) {
+                reconstructPnL();
             }
 
             // Persist and log
