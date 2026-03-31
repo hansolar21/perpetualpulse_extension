@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Perpetualpulse — Trade Analytics</title>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+    <header>
+        <h1>📊 Trade Analytics</h1>
+        <div id="status-bar">
+            <span id="status-text">Loading...</span>
+            <button id="btn-refresh" title="Re-sync trades">⟳ Sync</button>
+        </div>
+    </header>
+
+    <div id="summary-cards">
+        <div class="card">
+            <div class="card-label">Total Trades</div>
+            <div class="card-value" id="stat-trades">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Realized P&L</div>
+            <div class="card-value" id="stat-pnl">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Total Fees</div>
+            <div class="card-value" id="stat-fees">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Net P&L</div>
+            <div class="card-value" id="stat-net">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Total Volume</div>
+            <div class="card-value" id="stat-volume">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Win Rate</div>
+            <div class="card-value" id="stat-winrate">—</div>
+        </div>
+    </div>
+
+    <section class="chart-section">
+        <h2>Cumulative P&L</h2>
+        <div class="chart-container large">
+            <canvas id="chart-equity"></canvas>
+        </div>
+    </section>
+
+    <section class="chart-section">
+        <h2>Daily P&L</h2>
+        <div class="chart-container large">
+            <canvas id="chart-daily-pnl"></canvas>
+        </div>
+    </section>
+
+    <div class="two-col">
+        <section class="chart-section">
+            <h2>P&L by Market</h2>
+            <div class="chart-container">
+                <canvas id="chart-market-pnl"></canvas>
+            </div>
+        </section>
+        <section class="chart-section">
+            <h2>Volume by Market</h2>
+            <div class="chart-container">
+                <canvas id="chart-market-vol"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <div class="two-col">
+        <section class="chart-section">
+            <h2>Maker vs Taker</h2>
+            <div class="chart-container">
+                <canvas id="chart-maker-taker"></canvas>
+            </div>
+        </section>
+        <section class="chart-section">
+            <h2>Win Rate by Market</h2>
+            <div class="chart-container">
+                <canvas id="chart-winrate"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <section class="chart-section">
+        <h2>Monthly Summary</h2>
+        <div class="table-wrap">
+            <table id="table-monthly">
+                <thead>
+                    <tr>
+                        <th>Month</th>
+                        <th>Trades</th>
+                        <th>Volume</th>
+                        <th>Realized P&L</th>
+                        <th>Fees</th>
+                        <th>Net</th>
+                        <th>Maker %</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="chart-section">
+        <h2>Hourly Activity Heatmap</h2>
+        <div class="chart-container">
+            <canvas id="chart-heatmap"></canvas>
+        </div>
+    </section>
+
+    <section class="chart-section">
+        <h2>Cumulative Funding</h2>
+        <div class="chart-container large">
+            <canvas id="chart-funding"></canvas>
+        </div>
+    </section>
+
+    <script src="lib/chart.umd.min.js"></script>
+    <script src="lib/chartjs-adapter-date-fns.min.js"></script>
+    <script src="lib/sql-wasm.js"></script>
+    <script src="dashboard.js"></script>
+</body>
+</html>
