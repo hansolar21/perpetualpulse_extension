@@ -1,20 +1,22 @@
 {
   "manifest_version": 3,
   "name": "Perpetualpulse Trading Extension",
-  "version": "1.5",
+  "version": "2.0",
   "description": "Additional metrics for trading dashboards on Lighter.xyz and Hyperliquid.xyz",
-  "permissions": ["storage"],
+  "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": [
-    "https://app.lighter.xyz/trade/*",
+    "https://app.lighter.xyz/*",
     "https://mainnet.zklighter.elliot.ai/*",
     "https://app.hyperliquid.xyz/*",
     "https://api.hyperliquid.xyz/*"
   ],
   "content_scripts": [
     {
-      "matches": ["https://app.lighter.xyz/trade/*"],
+      "matches": ["https://app.lighter.xyz/*"],
       "js": [
         "platform.js",
+        "lib/sql-wasm.js",
+        "trade-history.js",
         "content.js",
         "hotkeys.js",
         "volatility.js"
@@ -29,6 +31,12 @@
         "hl-hotkeys.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["lib/sql-wasm.wasm"],
+      "matches": ["https://app.lighter.xyz/*", "https://mainnet.zklighter.elliot.ai/*"]
     }
   ],
   "icons": {
