@@ -4,9 +4,6 @@
 (function () {
     "use strict";
 
-    const DB_NAME = "pp_trade_history";
-    const DB_STORE = "sqlite_db";
-
     let _db = null;
     const COLORS = {
         green: "#10b981",
@@ -52,19 +49,16 @@
     }
 
     async function loadDB() {
-        const idb = await openIDB();
-        const data = await new Promise((resolve, reject) => {
-            const tx = idb.transaction(DB_STORE, "readonly");
-            const req = tx.objectStore(DB_STORE).get("db");
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
+        // Read from chrome.storage.local (shared across extension contexts)
+        const result = await new Promise((resolve) => {
+            chrome.storage.local.get("pp_trade_db", (r) => resolve(r));
         });
 
-        if (!data) return null;
+        if (!result.pp_trade_db) return null;
 
         const wasmUrl = chrome.runtime.getURL("lib/sql-wasm.wasm");
         const SQL = await initSqlJs({ locateFile: () => wasmUrl });
-        return new SQL.Database(new Uint8Array(data));
+        return new SQL.Database(new Uint8Array(result.pp_trade_db));
     }
 
     function query(sql) {

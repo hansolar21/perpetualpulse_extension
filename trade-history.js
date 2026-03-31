@@ -124,6 +124,10 @@
             if (saved) {
                 _db = new SQL.Database(new Uint8Array(saved));
                 console.log("[Perpetualpulse] Loaded existing trade DB from IndexedDB");
+                // Sync to chrome.storage.local for dashboard access
+                try {
+                    chrome.storage.local.set({ pp_trade_db: Array.from(new Uint8Array(saved)) });
+                } catch (e) {}
             } else {
                 _db = new SQL.Database();
                 createSchema();
@@ -182,6 +186,13 @@
         if (!_db) return;
         const data = _db.export();
         await saveDBToIDB(data.buffer);
+        // Also save to chrome.storage.local so dashboard page can access it
+        try {
+            const arr = Array.from(new Uint8Array(data.buffer));
+            chrome.storage.local.set({ pp_trade_db: arr });
+        } catch (e) {
+            console.warn("[Perpetualpulse] Failed to save DB to chrome.storage:", e);
+        }
     }
 
     // ---------- Data Fetch ----------
