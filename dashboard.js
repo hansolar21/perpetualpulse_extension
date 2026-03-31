@@ -147,6 +147,7 @@
         set("stat-trades", (totals.trades || 0).toLocaleString());
         set("stat-pnl", fmt(totals.pnl), pnlClass(totals.pnl));
         set("stat-fees", fmt(totals.fees));
+        set("stat-funding", fmt(funding), pnlClass(funding));
         set("stat-net", fmt(net), pnlClass(net));
         set("stat-volume", fmt(totals.volume));
         set("stat-winrate", winRate);
@@ -173,14 +174,12 @@
         const fundingMap = {};
         for (const f of fundingData) fundingMap[f.day] = f.funding;
 
-        let cumPnl = 0, cumNet = 0;
-        const labels = [], pnlData = [], netData = [];
+        let cumNet = 0;
+        const labels = [], netData = [];
         for (const row of data) {
             const dailyFunding = fundingMap[row.day] || 0;
-            cumPnl += row.pnl;
             cumNet += row.pnl - row.fees + dailyFunding;
             labels.push(row.day);
-            pnlData.push(cumPnl);
             netData.push(cumNet);
         }
 
@@ -190,20 +189,10 @@
                 labels,
                 datasets: [
                     {
-                        label: "Gross P&L",
-                        data: pnlData,
-                        borderColor: COLORS.blue,
-                        backgroundColor: COLORS.blue + "20",
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 0,
-                        borderWidth: 2,
-                    },
-                    {
-                        label: "Net P&L (after fees)",
+                        label: "Net P&L (incl. fees + funding)",
                         data: netData,
                         borderColor: COLORS.green,
-                        backgroundColor: COLORS.green + "10",
+                        backgroundColor: COLORS.green + "15",
                         fill: true,
                         tension: 0.3,
                         pointRadius: 0,
@@ -687,38 +676,70 @@
         }
 
         let cum = 0;
-        const labels = [], cumData = [];
+        const labels = [], cumData = [], dailyData = [], dailyColors = [];
         for (const r of data) {
             cum += r.payment;
             labels.push(r.day);
             cumData.push(cum);
+            dailyData.push(r.payment);
+            dailyColors.push(r.payment >= 0 ? COLORS.green + "cc" : COLORS.red + "cc");
         }
 
         new Chart(document.getElementById("chart-funding"), {
-            type: "line",
+            type: "bar",
             data: {
                 labels,
-                datasets: [{
-                    label: "Cumulative Funding",
-                    data: cumData,
-                    borderColor: COLORS.purple,
-                    backgroundColor: COLORS.purple + "20",
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 2,
-                }],
+                datasets: [
+                    {
+                        type: "line",
+                        label: "Cumulative Funding",
+                        data: cumData,
+                        borderColor: COLORS.purple,
+                        backgroundColor: COLORS.purple + "20",
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        yAxisID: "y",
+                        order: 0,
+                    },
+                    {
+                        type: "bar",
+                        label: "Daily Funding",
+                        data: dailyData,
+                        backgroundColor: dailyColors,
+                        borderRadius: 1,
+                        yAxisID: "y1",
+                        order: 1,
+                    },
+                ],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                interaction: { intersect: false, mode: "index" },
                 scales: {
                     x: { type: "time", time: { unit: "week" }, grid: { display: false } },
-                    y: { grid: { color: "#1e2a3a" }, ticks: { callback: (v) => fmt(v) } },
+                    y: {
+                        position: "left",
+                        grid: { color: "#1e2a3a" },
+                        ticks: { callback: (v) => fmt(v) },
+                        title: { display: true, text: "Cumulative", color: COLORS.purple },
+                    },
+                    y1: {
+                        position: "right",
+                        grid: { display: false },
+                        ticks: { callback: (v) => fmt(v) },
+                        title: { display: true, text: "Daily", color: "#8892a4" },
+                    },
                 },
                 plugins: {
                     zoom: zoomPanPlugin,
-                    tooltip: { callbacks: { label: (ctx) => fmt(ctx.raw) } },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.raw)}`,
+                        },
+                    },
                 },
             },
         });
