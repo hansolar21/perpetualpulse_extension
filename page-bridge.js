@@ -54,5 +54,39 @@
         }
     });
 
-    console.log("[Perpetualpulse] Page bridge active (fetch interceptor)");
+    // --- Expose console API for _PP_TradeDB ---
+    // Content script posts results back; we relay to a pending promise
+    const _pendingQueries = new Map();
+    window.addEventListener("message", (e) => {
+        if (e.source !== window) return;
+        if (e.data?.type === "pp-tradedb-result" && e.data.id) {
+            const resolve = _pendingQueries.get(e.data.id);
+            if (resolve) {
+                _pendingQueries.delete(e.data.id);
+                resolve(e.data.result);
+            }
+        }
+    });
+
+    function callTradeDB(method, args = []) {
+        return new Promise((resolve) => {
+            const id = "pp-q-" + Math.random().toString(36).slice(2);
+            _pendingQueries.set(id, resolve);
+            window.postMessage({ type: "pp-tradedb-call", id, method, args });
+            setTimeout(() => { _pendingQueries.delete(id); resolve("timeout"); }, 10000);
+        });
+    }
+
+    window._PP_TradeDB = {
+        sync: () => callTradeDB("sync"),
+        fullResync: () => callTradeDB("fullResync"),
+        status: () => callTradeDB("status"),
+        query: (sql) => callTradeDB("query", [sql]),
+        pnlByMarket: () => callTradeDB("pnlByMarket"),
+        dailyPnL: (days) => callTradeDB("dailyPnL", [days]),
+        monthlySummary: () => callTradeDB("monthlySummary"),
+        winRate: () => callTradeDB("winRate"),
+    };
+
+    console.log("[Perpetualpulse] Page bridge active (fetch interceptor + _PP_TradeDB console API)");
 })();

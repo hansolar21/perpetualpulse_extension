@@ -547,6 +547,25 @@
         },
     };
 
+    // ---------- Message bridge for MAIN world console API ----------
+    // Content scripts and MAIN world share postMessage but NOT window properties.
+    // page-bridge.js (MAIN) exposes window._PP_TradeDB that proxies calls here.
+    const _tradeDBApi = window._PP_TradeDB; // ref in this isolated world
+    window.addEventListener("message", async (e) => {
+        if (e.source !== window || e.data?.type !== "pp-tradedb-call") return;
+        const { id, method, args = [] } = e.data;
+        if (!_tradeDBApi || typeof _tradeDBApi[method] !== "function") {
+            window.postMessage({ type: "pp-tradedb-result", id, result: `unknown method: ${method}` });
+            return;
+        }
+        try {
+            const result = await _tradeDBApi[method](...args);
+            window.postMessage({ type: "pp-tradedb-result", id, result });
+        } catch (err) {
+            window.postMessage({ type: "pp-tradedb-result", id, result: `error: ${err.message}` });
+        }
+    });
+
     // ---------- Init ----------
     // Auto-sync on page load (with delay to not block rendering)
     setTimeout(async () => {
