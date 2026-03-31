@@ -205,14 +205,24 @@
             return null;
         }
 
-        // Fetch from S3 (may 404 if no data exists for this range)
-        const csvResp = await fetch(data.data_url);
-        if (!csvResp.ok) {
-            if (csvResp.status === 404) {
-                console.log("[Perpetualpulse] No export file on S3 for this range (404) — skipping");
-            } else {
-                console.warn(`[Perpetualpulse] S3 fetch failed: ${csvResp.status}`);
+        // Fetch from S3 — file is generated async, retry with backoff on 404
+        let csvResp = null;
+        const S3_RETRIES = 4;
+        const S3_DELAYS = [0, 2000, 5000, 10000]; // immediate, 2s, 5s, 10s
+        for (let attempt = 0; attempt < S3_RETRIES; attempt++) {
+            if (attempt > 0) {
+                console.log(`[Perpetualpulse] S3 retry ${attempt}/${S3_RETRIES - 1} after ${S3_DELAYS[attempt]}ms...`);
+                await new Promise((r) => setTimeout(r, S3_DELAYS[attempt]));
             }
+            csvResp = await fetch(data.data_url);
+            if (csvResp.ok) break;
+            if (csvResp.status !== 404) {
+                console.warn(`[Perpetualpulse] S3 fetch failed: ${csvResp.status}`);
+                return null;
+            }
+        }
+        if (!csvResp || !csvResp.ok) {
+            console.log("[Perpetualpulse] S3 file not available after retries (404) — skipping range");
             return null;
         }
         const csvText = await csvResp.text();
