@@ -185,7 +185,7 @@
     }
 
     // ---------- Data Fetch ----------
-    async function fetchExportCSV(authToken, accountIndex, type, startMs, endMs) {
+    async function fetchExportCSV(authToken, accountIndex, type, startMs, endMs, { maxRetries = 4 } = {}) {
         let params = `account_index=${accountIndex}&type=${type}&start_timestamp=${startMs}&end_timestamp=${endMs}`;
         if (type === "trade") params += "&side=all&role=all&trade_type=all";
 
@@ -207,7 +207,7 @@
 
         // Fetch from S3 — file is generated async, retry with backoff on 404
         let csvResp = null;
-        const S3_RETRIES = 4;
+        const S3_RETRIES = maxRetries;
         const S3_DELAYS = [0, 2000, 5000, 10000]; // immediate, 2s, 5s, 10s
         for (let attempt = 0; attempt < S3_RETRIES; attempt++) {
             if (attempt > 0) {
@@ -398,11 +398,15 @@
                 await new Promise((r) => setTimeout(r, 500));
             }
 
-            // Also sync funding
-            for (const [qStart, qEnd] of quarters) {
+            // Also sync funding (only last 2 quarters — most older ones 404)
+            const fundingQuarters = quarters.slice(-2);
+            for (const [qStart, qEnd] of fundingQuarters) {
                 try {
-                    const data = await fetchExportCSV(authToken, accountIndex, "funding", qStart, qEnd);
-                    if (data) insertFunding(data.rows);
+                    const data = await fetchExportCSV(authToken, accountIndex, "funding", qStart, qEnd, { maxRetries: 1 });
+                    if (data) {
+                        const added = insertFunding(data.rows);
+                        console.log(`[Perpetualpulse] +${added} funding entries`);
+                    }
                 } catch (e) {
                     // Funding export may fail for some ranges
                 }
