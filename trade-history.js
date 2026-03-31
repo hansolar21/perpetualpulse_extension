@@ -205,9 +205,16 @@
             return null;
         }
 
-        // Fetch from S3
+        // Fetch from S3 (may 404 if no data exists for this range)
         const csvResp = await fetch(data.data_url);
-        if (!csvResp.ok) return null;
+        if (!csvResp.ok) {
+            if (csvResp.status === 404) {
+                console.log("[Perpetualpulse] No export file on S3 for this range (404) — skipping");
+            } else {
+                console.warn(`[Perpetualpulse] S3 fetch failed: ${csvResp.status}`);
+            }
+            return null;
+        }
         const csvText = await csvResp.text();
         const lines = csvText.trim().split("\n");
         if (lines.length <= 1) return null; // headers only
@@ -281,28 +288,29 @@
 
     // ---------- Sync Logic ----------
     function getQuarterRanges(startDate, endDate) {
-        // Lighter export API requires KST-aligned quarter boundaries
+        // Lighter export API requires KST calendar-quarter-aligned boundaries
+        // Quarters: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec (in KST)
+        const KST_OFFSET_MS = 9 * 3600000;
         const ranges = [];
-        // Start from the 1st of the start month at 00:00 KST
-        let year = startDate.getUTCFullYear();
-        let month = startDate.getUTCMonth(); // 0-based
+
+        // Convert startDate to KST to find which calendar quarter it falls in
+        const startKST = new Date(startDate.getTime() + KST_OFFSET_MS);
+        let year = startKST.getUTCFullYear();
+        // Snap to calendar quarter start: Jan(0), Apr(3), Jul(6), Oct(9)
+        let month = Math.floor(startKST.getUTCMonth() / 3) * 3; // 0-based
 
         while (true) {
-            // Quarter start: 1st of month at 00:00 KST (= prev day 15:00 UTC)
-            const startKST = new Date(Date.UTC(year, month, 1) - 9 * 3600000);
-            // Quarter end: last day of month+2 at 23:59:59.999 KST
-            const endMonth = month + 2;
-            const endYear = year + Math.floor(endMonth / 12);
-            const endM = endMonth % 12;
-            // First day of next month minus 1ms = last moment of end month
-            const endKST = new Date(Date.UTC(endYear, endM + 1, 1) - 9 * 3600000 - 1);
+            // Quarter start: 1st of quarter month at 00:00:00.000 KST (= prev day 15:00 UTC)
+            const qStartUTC = new Date(Date.UTC(year, month, 1) - KST_OFFSET_MS);
+            // Quarter end month (0-based): month+2
+            const endM = month + 2;
+            // Last day of end month at 23:59:59.999 KST
+            // = first day of (endM+1) at 00:00 KST minus 1ms
+            const qEndUTC = new Date(Date.UTC(year, endM + 1, 1) - KST_OFFSET_MS - 1);
 
-            if (startKST.getTime() > endDate.getTime()) break;
+            if (qStartUTC.getTime() > endDate.getTime()) break;
 
-            const effectiveStart = startKST.getTime() < startDate.getTime() ? startDate.getTime() : startKST.getTime();
-            const effectiveEnd = endKST.getTime() > endDate.getTime() ? endDate.getTime() : endKST.getTime();
-
-            ranges.push([effectiveStart, effectiveEnd]);
+            ranges.push([qStartUTC.getTime(), Math.min(qEndUTC.getTime(), endDate.getTime())]);
 
             // Advance to next quarter
             month += 3;
