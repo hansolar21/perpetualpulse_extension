@@ -110,13 +110,18 @@
             FROM trades
         `)[0] || {};
 
+        const fundingTotal = query(`
+            SELECT COALESCE(SUM(payment), 0) as total FROM funding
+        `)[0] || {};
+
         const winData = query(`
             SELECT COUNT(*) as total,
                 SUM(CASE WHEN closed_pnl > 0 THEN 1 ELSE 0 END) as wins
             FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
         `)[0] || {};
 
-        const net = (totals.pnl || 0) - (totals.fees || 0);
+        const funding = fundingTotal.total || 0;
+        const net = (totals.pnl || 0) - (totals.fees || 0) + funding;
         const winRate = winData.total > 0 ? ((winData.wins / winData.total) * 100).toFixed(1) + "%" : "—";
 
         const set = (id, val, cls) => {
@@ -134,8 +139,9 @@
 
         // Status bar
         const range = query("SELECT MIN(date) as mn, MAX(date) as mx, COUNT(DISTINCT DATE(date)) as days FROM trades")[0] || {};
+        const fundingStr = funding !== 0 ? ` | funding: ${fmt(funding)}` : "";
         document.getElementById("status-text").textContent =
-            `${(totals.trades || 0).toLocaleString()} trades | ${range.days || 0} days | ${(range.mn || "").slice(0, 10)} → ${(range.mx || "").slice(0, 10)}`;
+            `${(totals.trades || 0).toLocaleString()} trades | ${range.days || 0} days | ${(range.mn || "").slice(0, 10)} → ${(range.mx || "").slice(0, 10)}${fundingStr}`;
     }
 
     // ---- Equity Curve ----
@@ -145,11 +151,20 @@
             FROM trades GROUP BY day ORDER BY day
         `);
 
+        // Get daily funding
+        const fundingData = query(`
+            SELECT DATE(date) as day, SUM(payment) as funding
+            FROM funding GROUP BY day ORDER BY day
+        `);
+        const fundingMap = {};
+        for (const f of fundingData) fundingMap[f.day] = f.funding;
+
         let cumPnl = 0, cumNet = 0;
         const labels = [], pnlData = [], netData = [];
         for (const row of data) {
+            const dailyFunding = fundingMap[row.day] || 0;
             cumPnl += row.pnl;
-            cumNet += row.pnl - row.fees;
+            cumNet += row.pnl - row.fees + dailyFunding;
             labels.push(row.day);
             pnlData.push(cumPnl);
             netData.push(cumNet);
@@ -396,6 +411,38 @@
         });
     }
 
+    // ---- Best & Worst Trades ----
+    function renderBestWorst() {
+        const best = query(`
+            SELECT market, side, date, trade_value, closed_pnl
+            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
+            ORDER BY closed_pnl DESC LIMIT 15
+        `);
+        const worst = query(`
+            SELECT market, side, date, trade_value, closed_pnl
+            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
+            ORDER BY closed_pnl ASC LIMIT 15
+        `);
+
+        const fillTable = (id, rows) => {
+            const tbody = document.querySelector(`#${id} tbody`);
+            tbody.innerHTML = "";
+            for (const r of rows) {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td>${r.market}</td>
+                    <td>${r.side}</td>
+                    <td>${(r.date || "").slice(0, 10)}</td>
+                    <td>${fmt(r.trade_value)}</td>
+                    <td class="${pnlClass(r.closed_pnl)}">${fmt(r.closed_pnl)}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+        };
+        fillTable("table-best", best);
+        fillTable("table-worst", worst);
+    }
+
     // ---- Monthly Table ----
     function renderMonthlyTable() {
         const data = query(`
@@ -409,10 +456,19 @@
             FROM trades GROUP BY month ORDER BY month DESC
         `);
 
+        // Monthly funding
+        const fundingData = query(`
+            SELECT strftime('%Y-%m', date) as month, SUM(payment) as funding
+            FROM funding GROUP BY month
+        `);
+        const fundingMap = {};
+        for (const f of fundingData) fundingMap[f.month] = f.funding;
+
         const tbody = document.querySelector("#table-monthly tbody");
         tbody.innerHTML = "";
         for (const r of data) {
-            const net = r.pnl - r.fees;
+            const funding = fundingMap[r.month] || 0;
+            const net = r.pnl - r.fees + funding;
             const makerPct = r.total > 0 ? ((r.maker / r.total) * 100).toFixed(1) + "%" : "—";
             const tr = document.createElement("tr");
             tr.innerHTML = `
@@ -421,6 +477,7 @@
                 <td>${fmt(r.volume)}</td>
                 <td class="${pnlClass(r.pnl)}">${fmt(r.pnl)}</td>
                 <td>${fmt(r.fees)}</td>
+                <td class="${pnlClass(funding)}">${fmt(funding)}</td>
                 <td class="${pnlClass(net)}">${fmt(net)}</td>
                 <td>${makerPct}</td>
             `;
@@ -550,6 +607,7 @@
             renderMarketVolume();
             renderMakerTaker();
             renderWinRate();
+            renderBestWorst();
             renderMonthlyTable();
             renderHeatmap();
             renderFunding();
