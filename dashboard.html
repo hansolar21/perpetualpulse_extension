@@ -47,7 +47,19 @@
 
     <section class="chart-section">
         <h2>Cumulative Net P&L</h2>
-        <div class="echart" id="chart-equity"></div>
+        <div class="equity-layout">
+            <div class="echart equity-chart" id="chart-equity"></div>
+            <div class="market-sidebar" id="market-sidebar">
+                <div class="sidebar-title">Markets</div>
+                <div class="sidebar-search"><input type="text" id="market-search" placeholder="Filter..." /></div>
+                <div class="sidebar-list" id="market-list"></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="chart-section">
+        <h2>Position Exposure</h2>
+        <div class="echart large" id="chart-exposure"></div>
     </section>
 
     <section class="chart-section">

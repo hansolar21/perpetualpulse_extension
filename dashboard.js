@@ -112,30 +112,228 @@
             `${(t.trades || 0).toLocaleString()} trades | ${range.days || 0} days | ${(range.mn || "").slice(0, 10)} → ${(range.mx || "").slice(0, 10)} | funding: ${fmt(funding)}`;
     }
 
-    function renderEquityCurve() {
+    // ---- Equity Curve with Market Overlay ----
+    let _equityChart = null;
+    let _equityDays = [];
+    let _equityBaseVals = [];
+    let _activeMarkets = new Set();
+    let _marketDailyPnl = {}; // market -> { day: cumPnl }
+
+    function computeEquityData() {
         const data = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees
             FROM trades GROUP BY day ORDER BY day`);
         const fd = query(`SELECT DATE(date) as day, SUM(payment) as funding FROM funding GROUP BY day`);
         const fmap = {}; for (const r of fd) fmap[r.day] = r.funding;
 
         let cum = 0;
-        const days = [], vals = [];
+        _equityDays = []; _equityBaseVals = [];
         for (const r of data) {
             cum += r.pnl - r.fees + (fmap[r.day] || 0);
-            days.push(r.day);
-            vals.push(Math.round(cum * 100) / 100);
+            _equityDays.push(r.day);
+            _equityBaseVals.push(Math.round(cum * 100) / 100);
         }
 
-        makeChart("chart-equity").setOption({
-            tooltip: { ...tooltipBase(), formatter: (p) => `${p[0].axisValue}<br/>Net P&L: <b>${fmt(p[0].value)}</b>` },
-            grid: baseGrid(),
+        // Pre-compute per-market cumulative PnL by day
+        const markets = query(`SELECT DISTINCT market FROM trades ORDER BY market`);
+        _marketDailyPnl = {};
+        for (const m of markets) {
+            const md = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net
+                FROM trades WHERE market='${m.market}' GROUP BY day ORDER BY day`);
+            let mcum = 0;
+            const dayMap = {};
+            for (const r of md) { mcum += r.net; dayMap[r.day] = Math.round(mcum * 100) / 100; }
+            _marketDailyPnl[m.market] = dayMap;
+        }
+    }
+
+    function getMarketSeries(market) {
+        const dayMap = _marketDailyPnl[market] || {};
+        let lastVal = 0;
+        return _equityDays.map((d) => { if (dayMap[d] !== undefined) lastVal = dayMap[d]; return lastVal; });
+    }
+
+    function updateEquityChart() {
+        const series = [{
+            name: "Total Net P&L", type: "line", data: _equityBaseVals, smooth: 0.3, symbol: "none",
+            lineStyle: { color: C.green, width: 2 },
+            areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + "30" }, { offset: 1, color: C.green + "05" }]) },
+            z: 1,
+        }];
+
+        let i = 0;
+        for (const market of _activeMarkets) {
+            const color = PALETTE[(i + 1) % PALETTE.length];
+            series.push({
+                name: market, type: "line", data: getMarketSeries(market), smooth: 0.3, symbol: "none",
+                lineStyle: { color, width: 1.5, type: "solid" }, yAxisIndex: 1, z: 2,
+            });
+            i++;
+        }
+
+        const hasOverlays = _activeMarkets.size > 0;
+
+        _equityChart.setOption({
+            tooltip: { ...tooltipBase(), trigger: "axis",
+                formatter: (params) => {
+                    let s = params[0].axisValue;
+                    for (const p of params) {
+                        const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
+                        s += `<br/>${dot}${p.seriesName}: <b>${fmt(p.value)}</b>`;
+                    }
+                    return s;
+                },
+            },
+            legend: hasOverlays ? { data: series.map((s) => s.name), textStyle: { color: C.dim, fontSize: 10 }, top: 5, type: "scroll" } : { show: false },
+            grid: baseGrid({ top: hasOverlays ? 45 : 30, right: hasOverlays ? 80 : 20 }),
+            xAxis: { type: "category", data: _equityDays, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
+            yAxis: [
+                { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+                hasOverlays ? { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { show: false } } : { show: false },
+            ],
+            dataZoom: dataZoomOpts(),
+            series,
+        }, { replaceMerge: ["series"] });
+    }
+
+    function renderEquityCurve() {
+        computeEquityData();
+        _equityChart = makeChart("chart-equity");
+        updateEquityChart();
+
+        // Build market sidebar
+        const marketPnl = query(`SELECT market, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net_pnl
+            FROM trades GROUP BY market ORDER BY ABS(SUM(COALESCE(closed_pnl,0)) - SUM(fee)) DESC`);
+        const list = document.getElementById("market-list");
+
+        for (const m of marketPnl) {
+            const el = document.createElement("div");
+            el.className = "market-item";
+            el.dataset.market = m.market;
+            const pnlColor = m.net_pnl >= 0 ? C.green : C.red;
+            el.innerHTML = `<span>${m.market}</span><span class="pnl" style="color:${pnlColor}">${fmt(m.net_pnl)}</span>`;
+            el.addEventListener("click", () => {
+                if (_activeMarkets.has(m.market)) {
+                    _activeMarkets.delete(m.market);
+                    el.classList.remove("active");
+                } else {
+                    _activeMarkets.add(m.market);
+                    el.classList.add("active");
+                }
+                updateEquityChart();
+            });
+            list.appendChild(el);
+        }
+
+        // Search filter
+        document.getElementById("market-search").addEventListener("input", (e) => {
+            const q = e.target.value.toLowerCase();
+            for (const item of list.children) {
+                item.style.display = item.dataset.market.toLowerCase().includes(q) ? "" : "none";
+            }
+        });
+    }
+
+    // ---- Position Exposure Chart ----
+    function renderExposure() {
+        // Reconstruct daily position snapshots from trades
+        // Track running position per market, compute daily long/short/net/gross exposure
+        const trades = query(`SELECT date, market, side, trade_value, size, price
+            FROM trades ORDER BY date ASC`);
+
+        const positions = {}; // market -> { direction, size, notional }
+        const dailySnaps = {}; // day -> { longNotional, shortNotional, grossNotional }
+
+        let currentDay = null;
+
+        const snapDay = (day) => {
+            let longN = 0, shortN = 0;
+            for (const [mkt, pos] of Object.entries(positions)) {
+                if (pos.size <= 0.0001) continue;
+                const notional = pos.notional;
+                if (pos.direction === "long") longN += notional;
+                else shortN += notional;
+            }
+            dailySnaps[day] = { long: longN, short: -shortN, gross: longN + shortN, net: longN - shortN };
+        };
+
+        for (const t of trades) {
+            const day = (t.date || "").slice(0, 10);
+            if (day !== currentDay && currentDay) snapDay(currentDay);
+            currentDay = day;
+
+            const mkt = t.market;
+            if (!positions[mkt]) positions[mkt] = { direction: null, size: 0, notional: 0 };
+            const pos = positions[mkt];
+
+            const side = t.side;
+            const isOpen = side === "Open Long" || side === "Open Short" || side === "Buy" ||
+                (side === "Long" && (!pos.direction || pos.direction === "long")) ||
+                (side === "Short" && (!pos.direction || pos.direction === "short"));
+            const isClose = side === "Close Long" || side === "Close Short" || side === "Sell" ||
+                (side === "Long" && pos.direction === "short") ||
+                (side === "Short" && pos.direction === "long");
+            const isFlip = side === "Long > Short" || side === "Short > Long";
+
+            if (isOpen) {
+                const dir = (side === "Open Long" || side === "Long" || side === "Buy" || side === "Short > Long") ? "long" : "short";
+                if (!pos.direction) pos.direction = dir;
+                pos.size += t.size;
+                pos.notional += t.trade_value;
+            } else if (isClose) {
+                const closeFrac = Math.min(t.size / (pos.size || 1), 1);
+                pos.size = Math.max(0, pos.size - t.size);
+                pos.notional = Math.max(0, pos.notional * (1 - closeFrac));
+                if (pos.size < 0.0001) { pos.direction = null; pos.size = 0; pos.notional = 0; }
+            } else if (isFlip) {
+                // Close all then open remaining
+                const oldSize = pos.size;
+                pos.size = 0; pos.notional = 0;
+                const remaining = t.size - oldSize;
+                if (remaining > 0) {
+                    pos.direction = side === "Long > Short" ? "short" : "long";
+                    pos.size = remaining;
+                    pos.notional = remaining * t.price;
+                } else {
+                    pos.direction = null;
+                }
+            }
+        }
+        if (currentDay) snapDay(currentDay);
+
+        const days = Object.keys(dailySnaps).sort();
+        const longVals = days.map((d) => Math.round(dailySnaps[d].long));
+        const shortVals = days.map((d) => Math.round(dailySnaps[d].short));
+        const netVals = days.map((d) => Math.round(dailySnaps[d].net));
+        const grossVals = days.map((d) => Math.round(dailySnaps[d].gross));
+
+        makeChart("chart-exposure").setOption({
+            tooltip: { ...tooltipBase(), trigger: "axis",
+                formatter: (params) => {
+                    let s = params[0].axisValue;
+                    for (const p of params) {
+                        const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
+                        s += `<br/>${dot}${p.seriesName}: <b>${fmt(p.value)}</b>`;
+                    }
+                    return s;
+                },
+            },
+            legend: { data: ["Long", "Short", "Net", "Gross"], textStyle: { color: C.dim }, top: 5 },
+            grid: baseGrid({ top: 40 }),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
             dataZoom: dataZoomOpts(),
-            series: [{
-                type: "line", data: vals, smooth: 0.3, symbol: "none", lineStyle: { color: C.green, width: 2 },
-                areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + "30" }, { offset: 1, color: C.green + "05" }]) },
-            }],
+            series: [
+                { name: "Long", type: "line", data: longVals, smooth: 0.2, symbol: "none",
+                    lineStyle: { color: C.green, width: 1.5 },
+                    areaStyle: { color: C.green + "15" }, stack: "exposure" },
+                { name: "Short", type: "line", data: shortVals, smooth: 0.2, symbol: "none",
+                    lineStyle: { color: C.red, width: 1.5 },
+                    areaStyle: { color: C.red + "15" }, stack: "exposure" },
+                { name: "Net", type: "line", data: netVals, smooth: 0.2, symbol: "none",
+                    lineStyle: { color: C.blue, width: 2, type: "dashed" } },
+                { name: "Gross", type: "line", data: grossVals, smooth: 0.2, symbol: "none",
+                    lineStyle: { color: C.amber, width: 1.5, type: "dotted" } },
+            ],
         });
     }
 
@@ -426,6 +624,7 @@
             }
             renderSummary();
             renderEquityCurve();
+            renderExposure();
             renderDailyPnL();
             renderMarketPnL();
             renderMarketVolume();
