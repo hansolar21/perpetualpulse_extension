@@ -276,14 +276,15 @@
     }
 
     function parseFundingRow(line) {
+        // CSV: Market,Side,Date,Position Size,Payment,Rate
         const parts = line.split(",");
-        if (parts.length < 5) return null;
+        if (parts.length < 6) return null;
         return {
             market: parts[0],
-            date: parts[1],
-            payment: parseFloat(parts[2]) || 0,
-            annual_rate: parseFloat(parts[3]) || 0,
-            position_size: parseFloat(parts[4]) || 0,
+            date: parts[2],
+            payment: parseFloat(parts[4]) || 0,
+            annual_rate: parseFloat(parts[5]) || 0,
+            position_size: parseFloat(parts[3]) || 0,
         };
     }
 
