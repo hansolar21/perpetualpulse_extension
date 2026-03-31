@@ -329,6 +329,27 @@
         return ranges;
     }
 
+    function getMonthlyRanges(startDate, endDate) {
+        // Monthly KST-aligned ranges for funding (which has stricter size limits)
+        const KST_OFFSET_MS = 9 * 3600000;
+        const ranges = [];
+        const startKST = new Date(startDate.getTime() + KST_OFFSET_MS);
+        let year = startKST.getUTCFullYear();
+        let month = startKST.getUTCMonth();
+
+        while (true) {
+            const mStartUTC = new Date(Date.UTC(year, month, 1) - KST_OFFSET_MS);
+            const mEndUTC = new Date(Date.UTC(year, month + 1, 1) - KST_OFFSET_MS - 1);
+
+            if (mStartUTC.getTime() > endDate.getTime()) break;
+            ranges.push([mStartUTC.getTime(), Math.min(mEndUTC.getTime(), endDate.getTime())]);
+
+            month++;
+            if (month >= 12) { month = 0; year++; }
+        }
+        return ranges;
+    }
+
     async function syncTradeHistory() {
         if (_syncing) return;
         _syncing = true;
@@ -375,8 +396,8 @@
                 startMs = new Date(lastDate).getTime() - 86400000;
                 console.log(`[Perpetualpulse] Incremental sync from ${lastDate}`);
             } else {
-                // First sync — start from account creation (~Jan 2025)
-                startMs = await loadMeta("first_trade_ms") || new Date("2025-01-17").getTime();
+                // First sync — start from account creation (Jan 17, 2025 KST)
+                startMs = await loadMeta("first_trade_ms") || new Date("2025-01-16T15:00:00Z").getTime(); // Jan 17 00:00 KST
                 console.log("[Perpetualpulse] Full sync from", new Date(startMs).toISOString());
             }
 
@@ -398,19 +419,19 @@
                 await new Promise((r) => setTimeout(r, 500));
             }
 
-            // Also sync funding (only last 2 quarters — most older ones 404)
-            const fundingQuarters = quarters.slice(-2);
-            for (const [qStart, qEnd] of fundingQuarters) {
+            // Sync funding using monthly ranges (quarterly exceeds max allowed limit)
+            const fundingMonths = getMonthlyRanges(new Date(startMs), new Date(endMs));
+            for (const [mStart, mEnd] of fundingMonths) {
                 try {
-                    const data = await fetchExportCSV(authToken, accountIndex, "funding", qStart, qEnd, { maxRetries: 1 });
+                    const data = await fetchExportCSV(authToken, accountIndex, "funding", mStart, mEnd, { maxRetries: 1 });
                     if (data) {
                         const added = insertFunding(data.rows);
-                        console.log(`[Perpetualpulse] +${added} funding entries`);
+                        if (added > 0) console.log(`[Perpetualpulse] +${added} funding entries`);
                     }
                 } catch (e) {
                     // Funding export may fail for some ranges
                 }
-                await new Promise((r) => setTimeout(r, 500));
+                await new Promise((r) => setTimeout(r, 300));
             }
 
             // Persist and log
