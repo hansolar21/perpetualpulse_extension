@@ -332,16 +332,9 @@
     }
 
     function parseTransferRow(line) {
-        // Transfer CSV format - need to discover columns from actual data
-        // Common: Date, Type (Deposit/Withdrawal/TransferInflow/TransferOutflow), Amount
         const parts = line.split(",");
         if (parts.length < 3) return null;
-        // Try to find date and amount - adapt based on actual CSV headers
-        return {
-            date: parts[0],
-            type: parts[1],
-            amount: parseFloat(parts[2]) || 0,
-        };
+        return { date: parts[0], type: parts[1], amount: parseFloat(parts[2]) || 0 };
     }
 
     function insertTransfers(rows) {
@@ -358,6 +351,90 @@
         }
         stmt.free();
         return added;
+    }
+
+    function insertTransferObjects(transfers) {
+        if (!_db || !transfers.length) return 0;
+        const stmt = _db.prepare(
+            `INSERT OR IGNORE INTO transfers (date, type, amount) VALUES (?, ?, ?)`
+        );
+        let added = 0;
+        for (const t of transfers) {
+            if (!t.date || !t.amount) continue;
+            stmt.run([t.date, t.type, t.amount]);
+            added += _db.getRowsModified();
+        }
+        stmt.free();
+        return added;
+    }
+
+    // Fetch transfer history from REST API (paginated)
+    async function fetchTransferHistory(authToken, accountIndex) {
+        const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer_history";
+        const transfers = [];
+        let cursor = undefined;
+        let pages = 0;
+
+        while (pages < 50) { // safety limit
+            let url = `${BASE}?account_index=${accountIndex}&limit=100`;
+            if (cursor) url += `&cursor=${cursor}`;
+
+            const resp = await fetch(url, {
+                headers: {
+                    Authorization: authToken,
+                    PreferAuthServer: "true",
+                    Origin: "https://app.lighter.xyz",
+                },
+            });
+
+            if (!resp.ok) {
+                if (resp.status === 403) {
+                    console.warn("[Perpetualpulse] Transfer history: auth required (403)");
+                }
+                break;
+            }
+
+            const data = await resp.json();
+            if (!data.transfers || data.transfers.length === 0) break;
+
+            for (const t of data.transfers) {
+                // Determine type and amount based on transfer direction
+                let type = t.type || "Unknown";
+                let amount = 0;
+                const ts = t.timestamp || t.created_at || t.date || "";
+                const date = ts ? new Date(typeof ts === "number" ? ts * 1000 : ts).toISOString() : "";
+
+                // Map transfer types
+                if (t.l1_tx_hash || type.toLowerCase().includes("deposit")) {
+                    type = "Deposit";
+                    amount = parseFloat(t.amount || t.collateral || 0);
+                } else if (type.toLowerCase().includes("withdraw")) {
+                    type = "Withdrawal";
+                    amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
+                } else if (type.toLowerCase().includes("inflow") || type.toLowerCase().includes("transfer_in")) {
+                    type = "TransferIn";
+                    amount = parseFloat(t.amount || t.collateral || 0);
+                } else if (type.toLowerCase().includes("outflow") || type.toLowerCase().includes("transfer_out")) {
+                    type = "TransferOut";
+                    amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
+                } else {
+                    // Generic — try to parse amount with sign
+                    amount = parseFloat(t.amount || t.collateral || t.value || 0);
+                }
+
+                if (date && amount !== 0) {
+                    transfers.push({ date, type, amount });
+                }
+            }
+
+            cursor = data.cursor;
+            if (!cursor) break;
+            pages++;
+            await new Promise((r) => setTimeout(r, 300));
+        }
+
+        console.log(`[Perpetualpulse] Fetched ${transfers.length} transfers from REST API (${pages + 1} pages)`);
+        return transfers;
     }
 
     // ---------- FIFO PnL Reconstruction ----------
@@ -612,17 +689,15 @@
                 await new Promise((r) => setTimeout(r, 300));
             }
 
-            // Sync transfers using monthly ranges
-            const transferMonths = getMonthlyRanges(new Date(startMs), new Date(endMs));
-            for (const [mStart, mEnd] of transferMonths) {
-                try {
-                    const data = await fetchExportCSV(authToken, accountIndex, "transfer", mStart, mEnd, { maxRetries: 1 });
-                    if (data) {
-                        const added = insertTransfers(data.rows);
-                        if (added > 0) console.log(`[Perpetualpulse] +${added} transfers`);
-                    }
-                } catch (e) {}
-                await new Promise((r) => setTimeout(r, 300));
+            // Sync transfers via REST API (paginated)
+            try {
+                const transfers = await fetchTransferHistory(authToken, accountIndex);
+                if (transfers.length > 0) {
+                    const added = insertTransferObjects(transfers);
+                    console.log(`[Perpetualpulse] +${added} new transfers (${transfers.length} total fetched)`);
+                }
+            } catch (e) {
+                console.warn("[Perpetualpulse] Transfer sync failed:", e.message);
             }
 
             // Reconstruct PnL for trades missing closed_pnl (pre-May 2025)

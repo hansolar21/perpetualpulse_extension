@@ -14,10 +14,11 @@
     };
     const PALETTE = [C.blue, C.green, C.purple, C.amber, C.cyan, C.pink, C.lime, C.orange, C.teal, C.indigo, C.rose, C.red];
 
-    function makeChart(id) {
+    function makeChart(id, { autoScaleY = true } = {}) {
         const el = document.getElementById(id);
         const chart = echarts.init(el, null, { renderer: "canvas" });
         charts.push(chart);
+        if (autoScaleY) attachYAutoScale(chart);
         return chart;
     }
 
@@ -34,12 +35,47 @@
     // dataZoom that auto-scales Y axis on zoom
     function dataZoomAutoY() {
         return [
-            { type: "inside", xAxisIndex: 0, filterMode: "weakFilter" },
+            { type: "inside", xAxisIndex: 0, filterMode: "none" },
             { type: "slider", xAxisIndex: 0, height: 25, bottom: 8, borderColor: C.border,
               backgroundColor: C.bg2, fillerColor: C.blue + "20",
               dataBackground: { lineStyle: { color: C.dim }, areaStyle: { color: C.blue + "10" } },
               textStyle: { color: C.dim, fontSize: 10 }, handleStyle: { color: C.blue } },
         ];
+    }
+
+    // Attach y-axis auto-rescale to a chart
+    function attachYAutoScale(chart) {
+        chart.on("datazoom", () => {
+            const opt = chart.getOption();
+            if (!opt.dataZoom || !opt.series) return;
+            const dz = opt.dataZoom[0];
+            const start = dz.start ?? 0;
+            const end = dz.end ?? 100;
+
+            // For each y-axis, find visible range
+            const yAxes = opt.yAxis || [];
+            const newYAxis = [];
+            for (let ai = 0; ai < yAxes.length; ai++) {
+                let mn = Infinity, mx = -Infinity;
+                for (const s of opt.series) {
+                    if ((s.yAxisIndex || 0) !== ai) continue;
+                    const data = s.data || [];
+                    const startIdx = Math.floor(data.length * start / 100);
+                    const endIdx = Math.ceil(data.length * end / 100);
+                    for (let i = startIdx; i < endIdx; i++) {
+                        const v = typeof data[i] === "object" ? data[i]?.value : data[i];
+                        if (v != null && isFinite(v)) { mn = Math.min(mn, v); mx = Math.max(mx, v); }
+                    }
+                }
+                if (mn < Infinity) {
+                    const pad = Math.max((mx - mn) * 0.08, 1);
+                    newYAxis.push({ min: mn - pad, max: mx + pad });
+                } else {
+                    newYAxis.push({});
+                }
+            }
+            chart.setOption({ yAxis: newYAxis }, { lazyUpdate: true });
+        });
     }
 
     function baseGrid(extra = {}) { return { top: 40, right: 20, bottom: 60, left: 70, ...extra }; }
@@ -173,7 +209,7 @@
         _equityChart.setOption({
             tooltip: { ...tooltipBase(), formatter: fmtTooltip },
             legend: hasOverlays ? { data: series.map((s) => s.name), textStyle: { color: C.dim, fontSize: 10 }, top: 5, type: "scroll",
-                itemStyle: { opacity: 0 } } : { show: false },
+                icon: "roundRect", itemWidth: 14, itemHeight: 3 } : { show: false },
             grid: baseGrid({ top: hasOverlays ? 45 : 30, right: hasOverlays ? 80 : 20 }),
             xAxis: { type: "category", data: _equityDays, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: [
@@ -193,20 +229,6 @@
     function renderEquityCurve() {
         computeEquityData();
         _equityChart = makeChart("chart-equity");
-
-        // Handle y-axis auto-scale on zoom
-        _equityChart.on("datazoom", function () {
-            const opt = _equityChart.getOption();
-            const dz = opt.dataZoom[0];
-            const startIdx = Math.floor((dz.start / 100) * _equityDays.length);
-            const endIdx = Math.ceil((dz.end / 100) * _equityDays.length);
-            const visibleVals = _equityBaseVals.slice(startIdx, endIdx);
-            if (visibleVals.length > 0) {
-                const mn = Math.min(...visibleVals), mx = Math.max(...visibleVals);
-                const pad = (mx - mn) * 0.05 || 100;
-                _equityChart.setOption({ yAxis: [{ min: mn - pad, max: mx + pad }] }, { lazyUpdate: true });
-            }
-        });
 
         updateEquityChart();
 
@@ -385,7 +407,7 @@
                 }
                 return s;
             }},
-            legend: { data: legendNames, textStyle: { color: C.dim }, top: 5, itemStyle: { opacity: 0 } },
+            legend: { data: legendNames, textStyle: { color: C.dim }, top: 5, icon: "roundRect", itemWidth: 14, itemHeight: 3 },
             grid: baseGrid({ top: 40, right: hasTransfers ? 80 : 20 }),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: yAxes,
@@ -422,7 +444,7 @@
 
         makeChart("chart-transfers").setOption({
             tooltip: { ...tooltipBase(), formatter: fmtTooltip },
-            legend: { data: ["Deposits", "Withdrawals", "Net Deposited"], textStyle: { color: C.dim }, top: 5, itemStyle: { opacity: 0 } },
+            legend: { data: ["Deposits", "Withdrawals", "Net Deposited"], textStyle: { color: C.dim }, top: 5, icon: "roundRect", itemWidth: 14, itemHeight: 3 },
             grid: baseGrid({ top: 40, right: 70 }),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: [
@@ -621,7 +643,7 @@
         }
         makeChart("chart-funding").setOption({
             tooltip: { ...tooltipBase(), formatter: fmtTooltip },
-            legend: { data: ["Cumulative", "Daily"], textStyle: { color: C.dim }, top: 5, itemStyle: { opacity: 0 } },
+            legend: { data: ["Cumulative", "Daily"], textStyle: { color: C.dim }, top: 5, icon: "roundRect", itemWidth: 14, itemHeight: 3 },
             grid: baseGrid({ right: 70 }),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: [
