@@ -420,7 +420,12 @@
 
             const totalTrades = _db.exec("SELECT COUNT(*) FROM trades")[0].values[0][0];
             const totalFunding = _db.exec("SELECT COUNT(*) FROM funding")[0].values[0][0];
+            const dateRange = _db.exec("SELECT MIN(date), MAX(date), COUNT(DISTINCT DATE(date)) FROM trades");
+            const [minDate, maxDate, uniqueDays] = dateRange.length > 0 ? dateRange[0].values[0] : [null, null, 0];
             console.log(`[Perpetualpulse] Sync complete: ${totalTrades} trades, ${totalFunding} funding entries (+${totalAdded} new)`);
+            if (minDate) {
+                console.log(`[Perpetualpulse] Dataset: ${uniqueDays} days | ${minDate.slice(0, 10)} → ${maxDate.slice(0, 10)} | ${totalTrades} rows`);
+            }
 
             _db.run(
                 `INSERT INTO sync_log (sync_time, type, rows_added) VALUES (datetime('now'), 'auto', ?)`,
