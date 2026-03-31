@@ -21,76 +21,24 @@
     let _syncing = false;
     let _lastSyncTime = 0;
 
-    // ---------- Auth ----------
-    function getAuthToken() {
-        // Lighter stores session auth in localStorage
-        // Content scripts can't access page localStorage directly,
-        // so we inject a script to read it
+    // ---------- Auth (via page-bridge.js in MAIN world) ----------
+    function getAuth() {
         return new Promise((resolve) => {
-            const id = "pp-auth-" + Math.random().toString(36).slice(2);
+            const id = "pp-req-" + Math.random().toString(36).slice(2);
             const handler = (e) => {
-                if (e.data?.type === id) {
+                if (e.data?.type === "pp-auth-response" && e.data.id === id) {
                     window.removeEventListener("message", handler);
-                    resolve(e.data.token || null);
+                    resolve({ token: e.data.token, accountIndex: e.data.accountIndex });
                 }
             };
             window.addEventListener("message", handler);
+            window.postMessage({ type: "pp-get-auth", id });
 
-            const script = document.createElement("script");
-            script.textContent = `window.postMessage({type:"${id}",token:localStorage.getItem("auth_token")})`;
-            document.documentElement.appendChild(script);
-            script.remove();
-
-            // Timeout after 1s
+            // Timeout after 2s
             setTimeout(() => {
                 window.removeEventListener("message", handler);
-                resolve(null);
-            }, 1000);
-        });
-    }
-
-    function getAccountIndex() {
-        // Try to read from page — account index is in the URL or Zustand store
-        // Fallback: read from the export API URL patterns in network requests
-        return new Promise((resolve) => {
-            const id = "pp-acct-" + Math.random().toString(36).slice(2);
-            const handler = (e) => {
-                if (e.data?.type === id) {
-                    window.removeEventListener("message", handler);
-                    resolve(e.data.index ?? null);
-                }
-            };
-            window.addEventListener("message", handler);
-
-            const script = document.createElement("script");
-            // Try multiple sources: Zustand store, localStorage, DOM
-            script.textContent = `
-                (function() {
-                    let idx = null;
-                    try {
-                        // Zustand stores are typically on window.__STORE__ or similar
-                        // The account index appears in various page elements
-                        const el = document.querySelector('[data-testid="account-index"]');
-                        if (el) idx = parseInt(el.textContent);
-                    } catch(e) {}
-                    if (idx === null) {
-                        try {
-                            // Check URL params
-                            const u = new URL(location.href);
-                            const ai = u.searchParams.get('account_index');
-                            if (ai) idx = parseInt(ai);
-                        } catch(e) {}
-                    }
-                    window.postMessage({type:"${id}",index:idx});
-                })();
-            `;
-            document.documentElement.appendChild(script);
-            script.remove();
-
-            setTimeout(() => {
-                window.removeEventListener("message", handler);
-                resolve(null);
-            }, 1000);
+                resolve({ token: null, accountIndex: null });
+            }, 2000);
         });
     }
 
@@ -352,23 +300,20 @@
         _syncing = true;
 
         try {
-            const authToken = await getAuthToken();
-            if (!authToken) {
+            const auth = await getAuth();
+            if (!auth.token) {
                 console.log("[Perpetualpulse] Not logged in, skipping trade sync");
                 return;
             }
+            const authToken = auth.token;
 
-            // Determine account index — try stored value first
-            let accountIndex = await loadMeta("account_index");
+            // Determine account index
+            let accountIndex = auth.accountIndex || await loadMeta("account_index");
             if (!accountIndex) {
-                accountIndex = await getAccountIndex();
-                if (!accountIndex) {
-                    // Default to 24 (hansolar's main) — TODO: detect dynamically
-                    console.log("[Perpetualpulse] Could not detect account index, skipping sync");
-                    return;
-                }
-                await saveMeta("account_index", accountIndex);
+                console.log("[Perpetualpulse] Could not detect account index, skipping sync");
+                return;
             }
+            await saveMeta("account_index", accountIndex);
 
             await initSQL();
             if (!_db) return;

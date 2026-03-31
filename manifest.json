@@ -24,6 +24,12 @@
       "run_at": "document_start"
     },
     {
+      "matches": ["https://app.lighter.xyz/*"],
+      "js": ["page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
       "matches": ["https://app.hyperliquid.xyz/*"],
       "js": [
         "platform.js",
