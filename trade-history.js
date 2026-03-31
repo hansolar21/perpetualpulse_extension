@@ -281,16 +281,32 @@
 
     // ---------- Sync Logic ----------
     function getQuarterRanges(startDate, endDate) {
-        const KST_OFFSET = 9 * 60 * 60 * 1000;
+        // Lighter export API requires KST-aligned quarter boundaries
         const ranges = [];
-        let current = new Date(startDate);
+        // Start from the 1st of the start month at 00:00 KST
+        let year = startDate.getUTCFullYear();
+        let month = startDate.getUTCMonth(); // 0-based
 
-        while (current < endDate) {
-            // Quarter end: ~3 months later
-            const qEnd = new Date(current.getTime() + QUARTER_MS);
-            const end = qEnd > endDate ? endDate : qEnd;
-            ranges.push([current.getTime(), end.getTime()]);
-            current = new Date(end.getTime() + 1);
+        while (true) {
+            // Quarter start: 1st of month at 00:00 KST (= prev day 15:00 UTC)
+            const startKST = new Date(Date.UTC(year, month, 1) - 9 * 3600000);
+            // Quarter end: last day of month+2 at 23:59:59.999 KST
+            const endMonth = month + 2;
+            const endYear = year + Math.floor(endMonth / 12);
+            const endM = endMonth % 12;
+            // First day of next month minus 1ms = last moment of end month
+            const endKST = new Date(Date.UTC(endYear, endM + 1, 1) - 9 * 3600000 - 1);
+
+            if (startKST.getTime() > endDate.getTime()) break;
+
+            const effectiveStart = startKST.getTime() < startDate.getTime() ? startDate.getTime() : startKST.getTime();
+            const effectiveEnd = endKST.getTime() > endDate.getTime() ? endDate.getTime() : endKST.getTime();
+
+            ranges.push([effectiveStart, effectiveEnd]);
+
+            // Advance to next quarter
+            month += 3;
+            if (month >= 12) { month -= 12; year++; }
         }
         return ranges;
     }
