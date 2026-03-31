@@ -3,7 +3,7 @@
     "use strict";
 
     let _db = null;
-    const charts = []; // for resize handling
+    const charts = [];
 
     const C = {
         green: "#10b981", red: "#ef4444", blue: "#3b82f6", purple: "#8b5cf6",
@@ -14,7 +14,6 @@
     };
     const PALETTE = [C.blue, C.green, C.purple, C.amber, C.cyan, C.pink, C.lime, C.orange, C.teal, C.indigo, C.rose, C.red];
 
-    // ---- ECharts helpers ----
     function makeChart(id) {
         const el = document.getElementById(id);
         const chart = echarts.init(el, null, { renderer: "canvas" });
@@ -22,7 +21,7 @@
         return chart;
     }
 
-    function dataZoomOpts(type = "slider") {
+    function dataZoomOpts() {
         return [
             { type: "inside", xAxisIndex: 0, filterMode: "none" },
             { type: "slider", xAxisIndex: 0, height: 25, bottom: 8, borderColor: C.border,
@@ -32,56 +31,56 @@
         ];
     }
 
-    function baseGrid(extra = {}) {
-        return { top: 40, right: 20, bottom: 60, left: 70, ...extra };
+    // dataZoom that auto-scales Y axis on zoom
+    function dataZoomAutoY() {
+        return [
+            { type: "inside", xAxisIndex: 0, filterMode: "weakFilter" },
+            { type: "slider", xAxisIndex: 0, height: 25, bottom: 8, borderColor: C.border,
+              backgroundColor: C.bg2, fillerColor: C.blue + "20",
+              dataBackground: { lineStyle: { color: C.dim }, areaStyle: { color: C.blue + "10" } },
+              textStyle: { color: C.dim, fontSize: 10 }, handleStyle: { color: C.blue } },
+        ];
     }
 
-    function tooltipBase() {
-        return {
-            trigger: "axis", backgroundColor: C.bg3, borderColor: C.border, borderWidth: 1,
-            textStyle: { color: C.text, fontSize: 12 },
-        };
+    function baseGrid(extra = {}) { return { top: 40, right: 20, bottom: 60, left: 70, ...extra }; }
+    function tooltipBase() { return { trigger: "axis", backgroundColor: C.bg3, borderColor: C.border, borderWidth: 1, textStyle: { color: C.text, fontSize: 12 } }; }
+
+    // Tooltip with colored dots
+    function fmtTooltip(params) {
+        let s = params[0].axisValue;
+        for (const p of params) {
+            const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
+            s += `<br/>${dot}${p.seriesName}: <b>${fmt(p.value)}</b>`;
+        }
+        return s;
     }
 
     // ---- DB ----
     function base64ToUint8(b64) {
-        const binary = atob(b64);
-        const u8 = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) u8[i] = binary.charCodeAt(i);
-        return u8;
+        const binary = atob(b64); const u8 = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) u8[i] = binary.charCodeAt(i); return u8;
     }
-
     async function loadDB() {
-        const result = await new Promise((resolve) => {
-            chrome.storage.local.get("pp_trade_db_b64", (r) => resolve(r));
-        });
+        const result = await new Promise((r) => chrome.storage.local.get("pp_trade_db_b64", r));
         if (!result.pp_trade_db_b64) return null;
-        const wasmUrl = chrome.runtime.getURL("lib/sql-wasm.wasm");
-        const SQL = await initSqlJs({ locateFile: () => wasmUrl });
+        const SQL = await initSqlJs({ locateFile: () => chrome.runtime.getURL("lib/sql-wasm.wasm") });
         return new SQL.Database(base64ToUint8(result.pp_trade_db_b64));
     }
-
     function query(sql) {
         if (!_db) return [];
         try {
             const result = _db.exec(sql);
             if (!result.length) return [];
-            return result[0].values.map((row) => {
-                const obj = {};
-                result[0].columns.forEach((col, i) => (obj[col] = row[i]));
-                return obj;
-            });
-        } catch (e) { console.error("Query error:", sql, e); return []; }
+            return result[0].values.map((row) => { const obj = {}; result[0].columns.forEach((col, i) => (obj[col] = row[i])); return obj; });
+        } catch (e) { console.error("Query:", sql, e); return []; }
     }
 
-    // ---- Format ----
     function fmt(n, d = 2) {
         if (n == null || isNaN(n)) return "—";
-        const sign = n < 0 ? "-" : "";
-        const a = Math.abs(n);
-        if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(1) + "M";
-        if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(1) + "K";
-        return sign + "$" + a.toFixed(d);
+        const s = n < 0 ? "-" : "", a = Math.abs(n);
+        if (a >= 1e6) return s + "$" + (a / 1e6).toFixed(1) + "M";
+        if (a >= 1e3) return s + "$" + (a / 1e3).toFixed(1) + "K";
+        return s + "$" + a.toFixed(d);
     }
     function pnlClass(n) { return n > 0 ? "positive" : n < 0 ? "negative" : ""; }
 
@@ -117,7 +116,7 @@
     let _equityDays = [];
     let _equityBaseVals = [];
     let _activeMarkets = new Set();
-    let _marketDailyPnl = {}; // market -> { day: cumPnl }
+    let _marketDailyPnl = {};
 
     function computeEquityData() {
         const data = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees
@@ -133,7 +132,6 @@
             _equityBaseVals.push(Math.round(cum * 100) / 100);
         }
 
-        // Pre-compute per-market cumulative PnL by day
         const markets = query(`SELECT DISTINCT market FROM trades ORDER BY market`);
         _marketDailyPnl = {};
         for (const m of markets) {
@@ -153,11 +151,13 @@
     }
 
     function updateEquityChart() {
+        const hasOverlays = _activeMarkets.size > 0;
+
         const series = [{
             name: "Total Net P&L", type: "line", data: _equityBaseVals, smooth: 0.3, symbol: "none",
             lineStyle: { color: C.green, width: 2 },
-            areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + "30" }, { offset: 1, color: C.green + "05" }]) },
-            z: 1,
+            areaStyle: hasOverlays ? undefined : { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + "30" }, { offset: 1, color: C.green + "05" }]) },
+            yAxisIndex: 0, z: 1,
         }];
 
         let i = 0;
@@ -165,32 +165,27 @@
             const color = PALETTE[(i + 1) % PALETTE.length];
             series.push({
                 name: market, type: "line", data: getMarketSeries(market), smooth: 0.3, symbol: "none",
-                lineStyle: { color, width: 1.5, type: "solid" }, yAxisIndex: 1, z: 2,
+                lineStyle: { color, width: 1.5 }, yAxisIndex: 1, z: 2,
             });
             i++;
         }
 
-        const hasOverlays = _activeMarkets.size > 0;
-
         _equityChart.setOption({
-            tooltip: { ...tooltipBase(), trigger: "axis",
-                formatter: (params) => {
-                    let s = params[0].axisValue;
-                    for (const p of params) {
-                        const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
-                        s += `<br/>${dot}${p.seriesName}: <b>${fmt(p.value)}</b>`;
-                    }
-                    return s;
-                },
-            },
-            legend: hasOverlays ? { data: series.map((s) => s.name), textStyle: { color: C.dim, fontSize: 10 }, top: 5, type: "scroll" } : { show: false },
+            tooltip: { ...tooltipBase(), formatter: fmtTooltip },
+            legend: hasOverlays ? { data: series.map((s) => s.name), textStyle: { color: C.dim, fontSize: 10 }, top: 5, type: "scroll",
+                itemStyle: { opacity: 0 } } : { show: false },
             grid: baseGrid({ top: hasOverlays ? 45 : 30, right: hasOverlays ? 80 : 20 }),
             xAxis: { type: "category", data: _equityDays, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: [
                 { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
-                hasOverlays ? { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { show: false } } : { show: false },
+                hasOverlays ? { type: "value", position: "right",
+                    axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { show: false },
+                    // Force 0 to be centered: set min/max symmetrically
+                    min: (value) => { const m = Math.max(Math.abs(value.min), Math.abs(value.max)); return -m; },
+                    max: (value) => { const m = Math.max(Math.abs(value.min), Math.abs(value.max)); return m; },
+                } : { show: false },
             ],
-            dataZoom: dataZoomOpts(),
+            dataZoom: dataZoomAutoY(),
             series,
         }, { replaceMerge: ["series"] });
     }
@@ -198,12 +193,47 @@
     function renderEquityCurve() {
         computeEquityData();
         _equityChart = makeChart("chart-equity");
+
+        // Handle y-axis auto-scale on zoom
+        _equityChart.on("datazoom", function () {
+            const opt = _equityChart.getOption();
+            const dz = opt.dataZoom[0];
+            const startIdx = Math.floor((dz.start / 100) * _equityDays.length);
+            const endIdx = Math.ceil((dz.end / 100) * _equityDays.length);
+            const visibleVals = _equityBaseVals.slice(startIdx, endIdx);
+            if (visibleVals.length > 0) {
+                const mn = Math.min(...visibleVals), mx = Math.max(...visibleVals);
+                const pad = (mx - mn) * 0.05 || 100;
+                _equityChart.setOption({ yAxis: [{ min: mn - pad, max: mx + pad }] }, { lazyUpdate: true });
+            }
+        });
+
         updateEquityChart();
 
         // Build market sidebar
         const marketPnl = query(`SELECT market, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net_pnl
             FROM trades GROUP BY market ORDER BY ABS(SUM(COALESCE(closed_pnl,0)) - SUM(fee)) DESC`);
         const list = document.getElementById("market-list");
+
+        // Select All button
+        const selectAll = document.createElement("div");
+        selectAll.className = "market-item";
+        selectAll.style.fontWeight = "600";
+        selectAll.style.borderBottom = "1px solid " + C.border;
+        selectAll.style.marginBottom = "4px";
+        selectAll.innerHTML = `<span>Select All</span><span class="pnl" style="color:${C.dim}">⊞</span>`;
+        let allSelected = false;
+        selectAll.addEventListener("click", () => {
+            allSelected = !allSelected;
+            for (const item of list.querySelectorAll(".market-item[data-market]")) {
+                const mkt = item.dataset.market;
+                if (allSelected) { _activeMarkets.add(mkt); item.classList.add("active"); }
+                else { _activeMarkets.delete(mkt); item.classList.remove("active"); }
+            }
+            selectAll.querySelector(".pnl").textContent = allSelected ? "⊟" : "⊞";
+            updateEquityChart();
+        });
+        list.appendChild(selectAll);
 
         for (const m of marketPnl) {
             const el = document.createElement("div");
@@ -212,22 +242,16 @@
             const pnlColor = m.net_pnl >= 0 ? C.green : C.red;
             el.innerHTML = `<span>${m.market}</span><span class="pnl" style="color:${pnlColor}">${fmt(m.net_pnl)}</span>`;
             el.addEventListener("click", () => {
-                if (_activeMarkets.has(m.market)) {
-                    _activeMarkets.delete(m.market);
-                    el.classList.remove("active");
-                } else {
-                    _activeMarkets.add(m.market);
-                    el.classList.add("active");
-                }
+                if (_activeMarkets.has(m.market)) { _activeMarkets.delete(m.market); el.classList.remove("active"); }
+                else { _activeMarkets.add(m.market); el.classList.add("active"); }
                 updateEquityChart();
             });
             list.appendChild(el);
         }
 
-        // Search filter
         document.getElementById("market-search").addEventListener("input", (e) => {
             const q = e.target.value.toLowerCase();
-            for (const item of list.children) {
+            for (const item of list.querySelectorAll(".market-item[data-market]")) {
                 item.style.display = item.dataset.market.toLowerCase().includes(q) ? "" : "none";
             }
         });
@@ -235,25 +259,44 @@
 
     // ---- Position Exposure Chart ----
     function renderExposure() {
-        // Reconstruct daily position snapshots from trades
-        // Track running position per market, compute daily long/short/net/gross exposure
-        const trades = query(`SELECT date, market, side, trade_value, size, price
-            FROM trades ORDER BY date ASC`);
+        const trades = query(`SELECT date, market, side, trade_value, size, price FROM trades ORDER BY date ASC`);
 
-        const positions = {}; // market -> { direction, size, notional }
-        const dailySnaps = {}; // day -> { longNotional, shortNotional, grossNotional }
+        // Try to get transfers for equity calculation
+        const transfers = query(`SELECT date, type, amount FROM transfers ORDER BY date ASC`);
+        const hasTransfers = transfers.length > 0;
 
+        const positions = {};
+        const dailySnaps = {};
         let currentDay = null;
+
+        // Compute running equity from transfers + realized PnL
+        let equity = 0;
+        const dailyEquity = {};
+        const transfersByDay = {};
+        for (const t of transfers) {
+            const day = (t.date || "").slice(0, 10);
+            if (!transfersByDay[day]) transfersByDay[day] = 0;
+            transfersByDay[day] += t.amount;
+        }
+
+        // Track daily realized PnL for equity calculation
+        const dailyRealizedPnl = {};
+        const realizedData = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net
+            FROM trades GROUP BY day ORDER BY day`);
+        for (const r of realizedData) dailyRealizedPnl[r.day] = r.net;
 
         const snapDay = (day) => {
             let longN = 0, shortN = 0;
-            for (const [mkt, pos] of Object.entries(positions)) {
+            for (const [, pos] of Object.entries(positions)) {
                 if (pos.size <= 0.0001) continue;
-                const notional = pos.notional;
-                if (pos.direction === "long") longN += notional;
-                else shortN += notional;
+                if (pos.direction === "long") longN += pos.notional;
+                else shortN += pos.notional;
             }
             dailySnaps[day] = { long: longN, short: -shortN, gross: longN + shortN, net: longN - shortN };
+
+            // Update equity
+            equity += (transfersByDay[day] || 0) + (dailyRealizedPnl[day] || 0);
+            dailyEquity[day] = equity;
         };
 
         for (const t of trades) {
@@ -264,7 +307,6 @@
             const mkt = t.market;
             if (!positions[mkt]) positions[mkt] = { direction: null, size: 0, notional: 0 };
             const pos = positions[mkt];
-
             const side = t.side;
             const isOpen = side === "Open Long" || side === "Open Short" || side === "Buy" ||
                 (side === "Long" && (!pos.direction || pos.direction === "long")) ||
@@ -285,17 +327,10 @@
                 pos.notional = Math.max(0, pos.notional * (1 - closeFrac));
                 if (pos.size < 0.0001) { pos.direction = null; pos.size = 0; pos.notional = 0; }
             } else if (isFlip) {
-                // Close all then open remaining
-                const oldSize = pos.size;
-                pos.size = 0; pos.notional = 0;
+                const oldSize = pos.size; pos.size = 0; pos.notional = 0;
                 const remaining = t.size - oldSize;
-                if (remaining > 0) {
-                    pos.direction = side === "Long > Short" ? "short" : "long";
-                    pos.size = remaining;
-                    pos.notional = remaining * t.price;
-                } else {
-                    pos.direction = null;
-                }
+                if (remaining > 0) { pos.direction = side === "Long > Short" ? "short" : "long"; pos.size = remaining; pos.notional = remaining * t.price; }
+                else pos.direction = null;
             }
         }
         if (currentDay) snapDay(currentDay);
@@ -306,37 +341,106 @@
         const netVals = days.map((d) => Math.round(dailySnaps[d].net));
         const grossVals = days.map((d) => Math.round(dailySnaps[d].gross));
 
+        const seriesList = [
+            { name: "Long", type: "line", data: longVals, smooth: 0.2, symbol: "none",
+                lineStyle: { color: C.green, width: 1.5 }, areaStyle: { color: C.green + "15" }, stack: "exposure" },
+            { name: "Short", type: "line", data: shortVals, smooth: 0.2, symbol: "none",
+                lineStyle: { color: C.red, width: 1.5 }, areaStyle: { color: C.red + "15" }, stack: "exposure" },
+            { name: "Net", type: "line", data: netVals, smooth: 0.2, symbol: "none",
+                lineStyle: { color: C.blue, width: 2, type: "dashed" } },
+            { name: "Gross", type: "line", data: grossVals, smooth: 0.2, symbol: "none",
+                lineStyle: { color: C.amber, width: 1.5, type: "dotted" } },
+        ];
+
+        const legendNames = ["Long", "Short", "Net", "Gross"];
+        const yAxes = [{ type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } }];
+
+        // Add leverage and equity if we have transfer data
+        if (hasTransfers) {
+            const equityVals = days.map((d) => Math.round(dailyEquity[d] || 0));
+            const leverageVals = days.map((d) => {
+                const eq = dailyEquity[d] || 0;
+                return eq > 0 ? Math.round((dailySnaps[d].gross / eq) * 100) / 100 : 0;
+            });
+
+            seriesList.push(
+                { name: "Equity", type: "line", data: equityVals, smooth: 0.2, symbol: "none",
+                    lineStyle: { color: C.purple, width: 2 }, yAxisIndex: 0 },
+                { name: "Leverage", type: "line", data: leverageVals, smooth: 0.2, symbol: "none",
+                    lineStyle: { color: C.cyan, width: 2 }, yAxisIndex: 1 },
+            );
+            legendNames.push("Equity", "Leverage");
+            yAxes.push({ type: "value", position: "right", name: "Leverage (x)",
+                nameTextStyle: { color: C.cyan }, axisLabel: { color: C.dim, formatter: "{value}x" },
+                splitLine: { show: false } });
+        }
+
         makeChart("chart-exposure").setOption({
-            tooltip: { ...tooltipBase(), trigger: "axis",
-                formatter: (params) => {
-                    let s = params[0].axisValue;
-                    for (const p of params) {
-                        const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
-                        s += `<br/>${dot}${p.seriesName}: <b>${fmt(p.value)}</b>`;
-                    }
-                    return s;
-                },
-            },
-            legend: { data: ["Long", "Short", "Net", "Gross"], textStyle: { color: C.dim }, top: 5 },
-            grid: baseGrid({ top: 40 }),
+            tooltip: { ...tooltipBase(), formatter: (params) => {
+                let s = params[0].axisValue;
+                for (const p of params) {
+                    const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
+                    const val = p.seriesName === "Leverage" ? p.value + "x" : fmt(p.value);
+                    s += `<br/>${dot}${p.seriesName}: <b>${val}</b>`;
+                }
+                return s;
+            }},
+            legend: { data: legendNames, textStyle: { color: C.dim }, top: 5, itemStyle: { opacity: 0 } },
+            grid: baseGrid({ top: 40, right: hasTransfers ? 80 : 20 }),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
-            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+            yAxis: yAxes,
+            dataZoom: dataZoomAutoY(),
+            series: seriesList,
+        });
+    }
+
+    // ---- Deposits & Withdrawals ----
+    function renderTransfers() {
+        const data = query(`SELECT DATE(date) as day, type, SUM(amount) as amount
+            FROM transfers GROUP BY day, type ORDER BY day`);
+        if (data.length === 0) {
+            document.getElementById("chart-transfers").innerHTML = '<p style="color:#8892a4;text-align:center;padding:60px">No transfer data yet. Sync from Lighter to fetch.</p>';
+            return;
+        }
+
+        // Running balance
+        let balance = 0;
+        const dayMap = {};
+        for (const r of data) {
+            if (!dayMap[r.day]) dayMap[r.day] = { deposits: 0, withdrawals: 0 };
+            if (r.amount > 0) dayMap[r.day].deposits += r.amount;
+            else dayMap[r.day].withdrawals += r.amount;
+        }
+        const days = Object.keys(dayMap).sort();
+        const deposits = [], withdrawals = [], cumBalance = [];
+        for (const d of days) {
+            deposits.push(Math.round(dayMap[d].deposits * 100) / 100);
+            withdrawals.push(Math.round(dayMap[d].withdrawals * 100) / 100);
+            balance += dayMap[d].deposits + dayMap[d].withdrawals;
+            cumBalance.push(Math.round(balance * 100) / 100);
+        }
+
+        makeChart("chart-transfers").setOption({
+            tooltip: { ...tooltipBase(), formatter: fmtTooltip },
+            legend: { data: ["Deposits", "Withdrawals", "Net Deposited"], textStyle: { color: C.dim }, top: 5, itemStyle: { opacity: 0 } },
+            grid: baseGrid({ top: 40, right: 70 }),
+            xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
+            yAxis: [
+                { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+                { type: "value", position: "right", name: "Cumulative", nameTextStyle: { color: C.purple },
+                    axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { show: false } },
+            ],
             dataZoom: dataZoomOpts(),
             series: [
-                { name: "Long", type: "line", data: longVals, smooth: 0.2, symbol: "none",
-                    lineStyle: { color: C.green, width: 1.5 },
-                    areaStyle: { color: C.green + "15" }, stack: "exposure" },
-                { name: "Short", type: "line", data: shortVals, smooth: 0.2, symbol: "none",
-                    lineStyle: { color: C.red, width: 1.5 },
-                    areaStyle: { color: C.red + "15" }, stack: "exposure" },
-                { name: "Net", type: "line", data: netVals, smooth: 0.2, symbol: "none",
-                    lineStyle: { color: C.blue, width: 2, type: "dashed" } },
-                { name: "Gross", type: "line", data: grossVals, smooth: 0.2, symbol: "none",
-                    lineStyle: { color: C.amber, width: 1.5, type: "dotted" } },
+                { name: "Deposits", type: "bar", data: deposits, itemStyle: { color: C.green }, barMaxWidth: 12, stack: "tf" },
+                { name: "Withdrawals", type: "bar", data: withdrawals, itemStyle: { color: C.red }, barMaxWidth: 12, stack: "tf" },
+                { name: "Net Deposited", type: "line", data: cumBalance, smooth: 0.3, symbol: "none",
+                    lineStyle: { color: C.purple, width: 2 }, yAxisIndex: 1 },
             ],
         });
     }
 
+    // ---- Daily P&L ----
     function renderDailyPnL() {
         const data = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees
             FROM trades GROUP BY day ORDER BY day`);
@@ -346,8 +450,7 @@
         const days = [], vals = [], colors = [];
         for (const r of data) {
             const net = r.pnl - r.fees + (fmap[r.day] || 0);
-            days.push(r.day);
-            vals.push(Math.round(net * 100) / 100);
+            days.push(r.day); vals.push(Math.round(net * 100) / 100);
             colors.push(net >= 0 ? C.green : C.red);
         }
 
@@ -356,7 +459,7 @@
             grid: baseGrid(),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
-            dataZoom: dataZoomOpts(),
+            dataZoom: dataZoomAutoY(),
             series: [{ type: "bar", data: vals, itemStyle: { color: (p) => colors[p.dataIndex] }, barMaxWidth: 8 }],
         });
     }
@@ -364,86 +467,62 @@
     function renderMarketPnL() {
         const data = query(`SELECT market, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net_pnl
             FROM trades GROUP BY market ORDER BY net_pnl DESC`);
-
         makeChart("chart-market-pnl").setOption({
             tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p) => `${p[0].name}: <b>${fmt(p[0].value)}</b>` },
             grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
             xAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
             yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
-            series: [{
-                type: "bar", data: data.map((r) => r.net_pnl).reverse(),
-                itemStyle: { color: (p) => p.value >= 0 ? C.green : C.red, borderRadius: [0, 3, 3, 0] },
-                barMaxWidth: 14,
-            }],
+            series: [{ type: "bar", data: data.map((r) => r.net_pnl).reverse(), itemStyle: { color: (p) => p.value >= 0 ? C.green : C.red, borderRadius: [0, 3, 3, 0] }, barMaxWidth: 14 }],
         });
     }
 
     function renderMarketVolume() {
         const data = query(`SELECT market, SUM(trade_value) as volume FROM trades GROUP BY market ORDER BY volume DESC LIMIT 15`);
-
         makeChart("chart-market-vol").setOption({
             tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p) => `${p[0].name}: <b>${fmt(p[0].value)}</b>` },
             grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
             xAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
             yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
-            series: [{
-                type: "bar", data: data.map((r) => r.volume).reverse(),
-                itemStyle: { color: (p) => PALETTE[p.dataIndex % PALETTE.length], borderRadius: [0, 3, 3, 0] },
-                barMaxWidth: 14,
-            }],
+            series: [{ type: "bar", data: data.map((r) => r.volume).reverse(), itemStyle: { color: (p) => PALETTE[p.dataIndex % PALETTE.length], borderRadius: [0, 3, 3, 0] }, barMaxWidth: 14 }],
         });
     }
 
     function renderMakerTaker() {
-        const data = query(`SELECT role, COUNT(*) as cnt, SUM(trade_value) as volume
-            FROM trades WHERE role IS NOT NULL GROUP BY role`);
-
+        const data = query(`SELECT role, COUNT(*) as cnt, SUM(trade_value) as volume FROM trades WHERE role IS NOT NULL GROUP BY role`);
         makeChart("chart-maker-taker").setOption({
             tooltip: { trigger: "item", backgroundColor: C.bg3, borderColor: C.border, textStyle: { color: C.text },
                 formatter: (p) => `${p.name}<br/>Volume: <b>${fmt(p.value)}</b><br/>Fills: ${data[p.dataIndex].cnt.toLocaleString()}` },
-            series: [{
-                type: "pie", radius: ["40%", "70%"], center: ["50%", "50%"],
+            series: [{ type: "pie", radius: ["40%", "70%"], center: ["50%", "50%"],
                 data: data.map((r, i) => ({ name: r.role, value: r.volume, itemStyle: { color: [C.blue, C.amber, C.purple][i] } })),
                 label: { color: C.text, formatter: "{b}\n{d}%" },
-                emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.5)" } },
-            }],
+                emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.5)" } } }],
         });
     }
 
     function renderWinRate() {
-        const data = query(`SELECT market, COUNT(*) as total,
-            SUM(CASE WHEN closed_pnl>0 THEN 1 ELSE 0 END) as wins,
+        const data = query(`SELECT market, COUNT(*) as total, SUM(CASE WHEN closed_pnl>0 THEN 1 ELSE 0 END) as wins,
             ROUND(100.0*SUM(CASE WHEN closed_pnl>0 THEN 1 ELSE 0 END)/COUNT(*),1) as win_rate
-            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0
-            GROUP BY market HAVING total>=10 ORDER BY win_rate DESC`);
-
+            FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 GROUP BY market HAVING total>=10 ORDER BY win_rate DESC`);
         makeChart("chart-winrate").setOption({
             tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" },
                 formatter: (p) => { const r = data[data.length - 1 - p[0].dataIndex]; return `${r.market}: <b>${r.win_rate}%</b> (${r.wins}/${r.total})`; } },
             grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
             xAxis: { type: "value", min: 0, max: 100, axisLabel: { color: C.dim, formatter: "{value}%" }, splitLine: { lineStyle: { color: C.border } } },
             yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
-            series: [{
-                type: "bar", data: data.map((r) => r.win_rate).reverse(),
+            series: [{ type: "bar", data: data.map((r) => r.win_rate).reverse(),
                 itemStyle: { color: (p) => p.value >= 50 ? C.green : C.red, borderRadius: [0, 3, 3, 0] },
-                barMaxWidth: 14, label: { show: true, position: "right", color: C.dim, fontSize: 10, formatter: "{c}%" },
-            }],
+                barMaxWidth: 14, label: { show: true, position: "right", color: C.dim, fontSize: 10, formatter: "{c}%" } }],
         });
     }
 
     function renderBestWorst() {
-        const best = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades
-            WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl DESC LIMIT 15`);
-        const worst = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades
-            WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl ASC LIMIT 15`);
-
+        const best = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl DESC LIMIT 15`);
+        const worst = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl ASC LIMIT 15`);
         const fillTable = (id, rows) => {
-            const tbody = document.querySelector(`#${id} tbody`);
-            tbody.innerHTML = "";
+            const tbody = document.querySelector(`#${id} tbody`); tbody.innerHTML = "";
             for (const r of rows) {
                 const tr = document.createElement("tr");
-                tr.innerHTML = `<td>${r.market}</td><td>${r.side}</td><td>${(r.date || "").slice(0, 10)}</td>
-                    <td>${fmt(r.trade_value)}</td><td class="${pnlClass(r.closed_pnl)}">${fmt(r.closed_pnl)}</td>`;
+                tr.innerHTML = `<td>${r.market}</td><td>${r.side}</td><td>${(r.date || "").slice(0, 10)}</td><td>${fmt(r.trade_value)}</td><td class="${pnlClass(r.closed_pnl)}">${fmt(r.closed_pnl)}</td>`;
                 tbody.appendChild(tr);
             }
         };
@@ -452,23 +531,17 @@
     }
 
     function renderMonthlyTable() {
-        const data = query(`SELECT strftime('%Y-%m', date) as month, COUNT(*) as trades,
-            SUM(trade_value) as volume, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees,
-            SUM(CASE WHEN role='Maker' THEN 1 ELSE 0 END) as maker, COUNT(*) as total
-            FROM trades GROUP BY month ORDER BY month DESC`);
+        const data = query(`SELECT strftime('%Y-%m', date) as month, COUNT(*) as trades, SUM(trade_value) as volume,
+            SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees, SUM(CASE WHEN role='Maker' THEN 1 ELSE 0 END) as maker,
+            COUNT(*) as total FROM trades GROUP BY month ORDER BY month DESC`);
         const fd = query(`SELECT strftime('%Y-%m', date) as month, SUM(payment) as funding FROM funding GROUP BY month`);
         const fmap = {}; for (const r of fd) fmap[r.month] = r.funding;
-
-        const tbody = document.querySelector("#table-monthly tbody");
-        tbody.innerHTML = "";
+        const tbody = document.querySelector("#table-monthly tbody"); tbody.innerHTML = "";
         for (const r of data) {
-            const funding = fmap[r.month] || 0;
-            const net = r.pnl - r.fees + funding;
+            const funding = fmap[r.month] || 0, net = r.pnl - r.fees + funding;
             const makerPct = r.total > 0 ? ((r.maker / r.total) * 100).toFixed(1) + "%" : "—";
             const tr = document.createElement("tr");
-            tr.innerHTML = `<td>${r.month}</td><td>${r.trades.toLocaleString()}</td><td>${fmt(r.volume)}</td>
-                <td class="${pnlClass(r.pnl)}">${fmt(r.pnl)}</td><td>${fmt(r.fees)}</td>
-                <td class="${pnlClass(funding)}">${fmt(funding)}</td><td class="${pnlClass(net)}">${fmt(net)}</td><td>${makerPct}</td>`;
+            tr.innerHTML = `<td>${r.month}</td><td>${r.trades.toLocaleString()}</td><td>${fmt(r.volume)}</td><td class="${pnlClass(r.pnl)}">${fmt(r.pnl)}</td><td>${fmt(r.fees)}</td><td class="${pnlClass(funding)}">${fmt(funding)}</td><td class="${pnlClass(net)}">${fmt(net)}</td><td>${makerPct}</td>`;
             tbody.appendChild(tr);
         }
     }
@@ -476,45 +549,24 @@
     function renderHourlyBox() {
         const raw = query(`SELECT CAST(strftime('%H', date) AS INTEGER) as hour, closed_pnl
             FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY hour`);
-
         const byHour = {};
         for (let h = 0; h < 24; h++) byHour[h] = [];
         for (const r of raw) byHour[r.hour].push(r.closed_pnl);
 
-        // Compute box plot stats
-        const boxData = [];
-        const scatterData = [];
-        const hourLabels = [];
-        const hourSums = [];
-
+        const boxData = [], scatterData = [], hourLabels = [], hourSums = [];
         for (let h = 0; h < 24; h++) {
             const kst = (h + 9) % 24;
             hourLabels.push(`${String(h).padStart(2, "0")} UTC / ${String(kst).padStart(2, "0")} KST`);
-
             const vals = byHour[h].slice().sort((a, b) => a - b);
             hourSums.push(vals.reduce((s, v) => s + v, 0));
-
             if (vals.length === 0) { boxData.push([0, 0, 0, 0, 0]); continue; }
-
-            const q1Idx = Math.floor(vals.length * 0.25);
-            const q2Idx = Math.floor(vals.length * 0.5);
-            const q3Idx = Math.floor(vals.length * 0.75);
+            const q1Idx = Math.floor(vals.length * 0.25), q2Idx = Math.floor(vals.length * 0.5), q3Idx = Math.floor(vals.length * 0.75);
             const iqr = vals[q3Idx] - vals[q1Idx];
-            const lo = Math.max(vals[0], vals[q1Idx] - 1.5 * iqr);
-            const hi = Math.min(vals[vals.length - 1], vals[q3Idx] + 1.5 * iqr);
-
-            // ECharts boxplot: [min, Q1, median, Q3, max]
+            const lo = Math.max(vals[0], vals[q1Idx] - 1.5 * iqr), hi = Math.min(vals[vals.length - 1], vals[q3Idx] + 1.5 * iqr);
             boxData.push([lo, vals[q1Idx], vals[q2Idx], vals[q3Idx], hi]);
-
-            // Sample scatter points
             let sampled = vals;
-            if (sampled.length > 150) {
-                const step = Math.ceil(sampled.length / 150);
-                sampled = sampled.filter((_, i) => i % step === 0);
-            }
-            for (const v of sampled) {
-                scatterData.push([h + (Math.random() - 0.5) * 0.3, v]);
-            }
+            if (sampled.length > 150) { const step = Math.ceil(sampled.length / 150); sampled = sampled.filter((_, i) => i % step === 0); }
+            for (const v of sampled) scatterData.push([h + (Math.random() - 0.5) * 0.3, v]);
         }
 
         makeChart("chart-hourly-box").setOption({
@@ -523,42 +575,27 @@
                     if (p.seriesType === "scatter") return `Trade: <b>${fmt(p.value[1])}</b>`;
                     const d = p.value;
                     return `${p.name}<br/>Max: ${fmt(d[5])}<br/>Q3: ${fmt(d[4])}<br/>Median: ${fmt(d[3])}<br/>Q1: ${fmt(d[2])}<br/>Min: ${fmt(d[1])}<br/>Net: <b>${fmt(hourSums[p.dataIndex])}</b>`;
-                },
-            },
+                } },
             grid: baseGrid({ bottom: 50 }),
             xAxis: { type: "category", data: hourLabels, axisLabel: { color: C.dim, fontSize: 9, rotate: 45 }, axisLine: { lineStyle: { color: C.border } } },
-            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } },
-                min: -5000, max: 5000 },
+            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } }, min: -5000, max: 5000 },
             dataZoom: [{ type: "inside", yAxisIndex: 0 }],
             series: [
-                {
-                    type: "boxplot", data: boxData,
-                    itemStyle: {
-                        color: (p) => hourSums[p.dataIndex] >= 0 ? C.green + "25" : C.red + "25",
-                        borderColor: (p) => hourSums[p.dataIndex] >= 0 ? C.green : C.red,
-                        borderWidth: 1.5,
-                    },
-                    boxWidth: ["40%", "60%"],
-                },
-                {
-                    type: "scatter", data: scatterData,
-                    symbolSize: 3,
-                    itemStyle: { color: (p) => p.value[1] >= 0 ? C.green + "50" : C.red + "50" },
-                },
+                { type: "boxplot", data: boxData,
+                    itemStyle: { color: (p) => hourSums[p.dataIndex] >= 0 ? C.green + "25" : C.red + "25",
+                        borderColor: (p) => hourSums[p.dataIndex] >= 0 ? C.green : C.red, borderWidth: 1.5 },
+                    boxWidth: ["40%", "60%"] },
+                { type: "scatter", data: scatterData, symbolSize: 3,
+                    itemStyle: { color: (p) => p.value[1] >= 0 ? C.green + "50" : C.red + "50" } },
             ],
         });
     }
 
     function renderHeatmap() {
-        const data = query(`SELECT CAST(strftime('%w', date) AS INTEGER) as dow,
-            CAST(strftime('%H', date) AS INTEGER) as hour, COUNT(*) as cnt
-            FROM trades GROUP BY dow, hour`);
-
+        const data = query(`SELECT CAST(strftime('%w', date) AS INTEGER) as dow, CAST(strftime('%H', date) AS INTEGER) as hour, COUNT(*) as cnt FROM trades GROUP BY dow, hour`);
         const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const heatData = [];
-        let maxCnt = 1;
+        const heatData = []; let maxCnt = 1;
         for (const r of data) { maxCnt = Math.max(maxCnt, r.cnt); heatData.push([r.hour, r.dow, r.cnt]); }
-
         makeChart("chart-heatmap").setOption({
             tooltip: { backgroundColor: C.bg3, borderColor: C.border, textStyle: { color: C.text },
                 formatter: (p) => `${days[p.value[1]]} ${String(p.value[0]).padStart(2, "0")}:00 UTC<br/>${p.value[2]} trades` },
@@ -567,49 +604,36 @@
                 axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } }, splitArea: { show: true, areaStyle: { color: [C.bg2, C.bg] } } },
             yAxis: { type: "category", data: days, axisLabel: { color: C.text }, axisLine: { show: false } },
             visualMap: { min: 0, max: maxCnt, calculable: true, orient: "vertical", right: 10, top: 10, bottom: 30,
-                inRange: { color: [C.bg2, C.blue + "40", C.blue + "80", C.blue] },
-                textStyle: { color: C.dim } },
+                inRange: { color: [C.bg2, C.blue + "40", C.blue + "80", C.blue] }, textStyle: { color: C.dim } },
             series: [{ type: "heatmap", data: heatData, emphasis: { itemStyle: { shadowBlur: 5, shadowColor: C.blue } } }],
         });
     }
 
     function renderFunding() {
         const data = query(`SELECT DATE(date) as day, SUM(payment) as payment FROM funding GROUP BY day ORDER BY day`);
-        if (data.length === 0) {
-            document.getElementById("chart-funding").innerHTML = '<p style="color:#8892a4;text-align:center;padding:60px">No funding data</p>';
-            return;
-        }
-
+        if (data.length === 0) { document.getElementById("chart-funding").innerHTML = '<p style="color:#8892a4;text-align:center;padding:60px">No funding data</p>'; return; }
         let cum = 0;
         const days = [], cumVals = [], dailyVals = [], dailyColors = [];
         for (const r of data) {
-            cum += r.payment;
-            days.push(r.day);
-            cumVals.push(Math.round(cum * 100) / 100);
-            dailyVals.push(Math.round(r.payment * 100) / 100);
+            cum += r.payment; days.push(r.day);
+            cumVals.push(Math.round(cum * 100) / 100); dailyVals.push(Math.round(r.payment * 100) / 100);
             dailyColors.push(r.payment >= 0 ? C.green : C.red);
         }
-
         makeChart("chart-funding").setOption({
-            tooltip: { ...tooltipBase(), formatter: (p) => {
-                let s = p[0].axisValue;
-                for (const item of p) s += `<br/>${item.seriesName}: <b>${fmt(item.value)}</b>`;
-                return s;
-            }},
-            legend: { data: ["Cumulative", "Daily"], textStyle: { color: C.dim }, top: 5 },
+            tooltip: { ...tooltipBase(), formatter: fmtTooltip },
+            legend: { data: ["Cumulative", "Daily"], textStyle: { color: C.dim }, top: 5, itemStyle: { opacity: 0 } },
             grid: baseGrid({ right: 70 }),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: [
-                { type: "value", name: "Cumulative", nameTextStyle: { color: C.purple }, axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
-                { type: "value", name: "Daily", nameTextStyle: { color: C.dim }, axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { show: false } },
+                { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+                { type: "value", position: "right", name: "Daily", nameTextStyle: { color: C.dim }, axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { show: false } },
             ],
             dataZoom: dataZoomOpts(),
             series: [
                 { name: "Cumulative", type: "line", data: cumVals, smooth: 0.3, symbol: "none", yAxisIndex: 0,
                     lineStyle: { color: C.purple, width: 2 },
                     areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.purple + "30" }, { offset: 1, color: C.purple + "05" }]) } },
-                { name: "Daily", type: "bar", data: dailyVals, yAxisIndex: 1,
-                    itemStyle: { color: (p) => dailyColors[p.dataIndex] }, barMaxWidth: 6 },
+                { name: "Daily", type: "bar", data: dailyVals, yAxisIndex: 1, itemStyle: { color: (p) => dailyColors[p.dataIndex] }, barMaxWidth: 6 },
             ],
         });
     }
@@ -618,13 +642,11 @@
     async function init() {
         try {
             _db = await loadDB();
-            if (!_db) {
-                document.getElementById("status-text").textContent = "No trade data. Open app.lighter.xyz first to sync.";
-                return;
-            }
+            if (!_db) { document.getElementById("status-text").textContent = "No trade data. Open app.lighter.xyz first to sync."; return; }
             renderSummary();
             renderEquityCurve();
             renderExposure();
+            renderTransfers();
             renderDailyPnL();
             renderMarketPnL();
             renderMarketVolume();
@@ -641,16 +663,12 @@
         }
     }
 
-    // Resize all charts
     window.addEventListener("resize", () => { for (const c of charts) c.resize(); });
-
-    // Sync button
     document.getElementById("btn-refresh").addEventListener("click", () => {
         chrome.tabs.create({ url: "https://app.lighter.xyz/trade/BTC", active: false }, (tab) => {
-            document.getElementById("status-text").textContent = "Syncing... (opened Lighter tab)";
+            document.getElementById("status-text").textContent = "Syncing...";
             setTimeout(() => { chrome.tabs.remove(tab.id); location.reload(); }, 30000);
         });
     });
-
     init();
 })();

@@ -172,6 +172,15 @@
             );
             CREATE INDEX IF NOT EXISTS idx_funding_date ON funding(date);
 
+            CREATE TABLE IF NOT EXISTS transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                UNIQUE(date, type, amount)
+            );
+            CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
+
             CREATE TABLE IF NOT EXISTS sync_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sync_time TEXT NOT NULL,
@@ -316,6 +325,35 @@
             const r = parseFundingRow(line);
             if (!r) continue;
             stmt.run([r.market, r.date, r.payment, r.annual_rate, r.position_size]);
+            added += _db.getRowsModified();
+        }
+        stmt.free();
+        return added;
+    }
+
+    function parseTransferRow(line) {
+        // Transfer CSV format - need to discover columns from actual data
+        // Common: Date, Type (Deposit/Withdrawal/TransferInflow/TransferOutflow), Amount
+        const parts = line.split(",");
+        if (parts.length < 3) return null;
+        // Try to find date and amount - adapt based on actual CSV headers
+        return {
+            date: parts[0],
+            type: parts[1],
+            amount: parseFloat(parts[2]) || 0,
+        };
+    }
+
+    function insertTransfers(rows) {
+        if (!_db || rows.length === 0) return 0;
+        const stmt = _db.prepare(
+            `INSERT OR IGNORE INTO transfers (date, type, amount) VALUES (?, ?, ?)`
+        );
+        let added = 0;
+        for (const line of rows) {
+            const r = parseTransferRow(line);
+            if (!r || !r.date || r.amount === 0) continue;
+            stmt.run([r.date, r.type, r.amount]);
             added += _db.getRowsModified();
         }
         stmt.free();
@@ -571,6 +609,19 @@
                 } catch (e) {
                     // Funding export may fail for some ranges
                 }
+                await new Promise((r) => setTimeout(r, 300));
+            }
+
+            // Sync transfers using monthly ranges
+            const transferMonths = getMonthlyRanges(new Date(startMs), new Date(endMs));
+            for (const [mStart, mEnd] of transferMonths) {
+                try {
+                    const data = await fetchExportCSV(authToken, accountIndex, "transfer", mStart, mEnd, { maxRetries: 1 });
+                    if (data) {
+                        const added = insertTransfers(data.rows);
+                        if (added > 0) console.log(`[Perpetualpulse] +${added} transfers`);
+                    }
+                } catch (e) {}
                 await new Promise((r) => setTimeout(r, 300));
             }
 
