@@ -48,17 +48,24 @@
         });
     }
 
+    function base64ToUint8(b64) {
+        const binary = atob(b64);
+        const u8 = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) u8[i] = binary.charCodeAt(i);
+        return u8;
+    }
+
     async function loadDB() {
         // Read from chrome.storage.local (shared across extension contexts)
         const result = await new Promise((resolve) => {
-            chrome.storage.local.get("pp_trade_db", (r) => resolve(r));
+            chrome.storage.local.get("pp_trade_db_b64", (r) => resolve(r));
         });
 
-        if (!result.pp_trade_db) return null;
+        if (!result.pp_trade_db_b64) return null;
 
         const wasmUrl = chrome.runtime.getURL("lib/sql-wasm.wasm");
         const SQL = await initSqlJs({ locateFile: () => wasmUrl });
-        return new SQL.Database(new Uint8Array(result.pp_trade_db));
+        return new SQL.Database(base64ToUint8(result.pp_trade_db_b64));
     }
 
     function query(sql) {

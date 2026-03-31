@@ -126,7 +126,8 @@
                 console.log("[Perpetualpulse] Loaded existing trade DB from IndexedDB");
                 // Sync to chrome.storage.local for dashboard access
                 try {
-                    chrome.storage.local.set({ pp_trade_db: Array.from(new Uint8Array(saved)) });
+                    const b64 = uint8ToBase64(new Uint8Array(saved));
+                    chrome.storage.local.set({ pp_trade_db_b64: b64 });
                 } catch (e) {}
             } else {
                 _db = new SQL.Database();
@@ -182,14 +183,27 @@
         `);
     }
 
+    function uint8ToBase64(u8) {
+        let binary = "";
+        const chunk = 8192;
+        for (let i = 0; i < u8.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+        }
+        return btoa(binary);
+    }
+
     async function persistDB() {
         if (!_db) return;
         const data = _db.export();
         await saveDBToIDB(data.buffer);
         // Also save to chrome.storage.local so dashboard page can access it
         try {
-            const arr = Array.from(new Uint8Array(data.buffer));
-            chrome.storage.local.set({ pp_trade_db: arr });
+            const b64 = uint8ToBase64(data);
+            chrome.storage.local.set({ pp_trade_db_b64: b64 }, () => {
+                if (chrome.runtime.lastError) {
+                    console.warn("[Perpetualpulse] storage.local save error:", chrome.runtime.lastError);
+                }
+            });
         } catch (e) {
             console.warn("[Perpetualpulse] Failed to save DB to chrome.storage:", e);
         }
