@@ -34,6 +34,20 @@
     Chart.defaults.plugins.tooltip.padding = 10;
     Chart.defaults.plugins.tooltip.cornerRadius = 6;
 
+    // ---- Zoom/Pan config for time series ----
+    const zoomPanPlugin = {
+        zoom: {
+            wheel: { enabled: true, modifierKey: null },
+            pinch: { enabled: true },
+            drag: { enabled: true, modifierKey: "shift" },
+            mode: "x",
+        },
+        pan: {
+            enabled: true,
+            mode: "x",
+        },
+    };
+
     // ---- IndexedDB ----
     function openIDB() {
         return new Promise((resolve, reject) => {
@@ -209,6 +223,7 @@
                     },
                 },
                 plugins: {
+                    zoom: zoomPanPlugin,
                     tooltip: {
                         callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.raw)}` },
                     },
@@ -252,6 +267,7 @@
                     },
                 },
                 plugins: {
+                    zoom: zoomPanPlugin,
                     legend: { display: false },
                     tooltip: { callbacks: { label: (ctx) => fmt(ctx.raw) } },
                 },
@@ -485,6 +501,123 @@
         }
     }
 
+    // ---- Hourly P&L Box Plot ----
+    function renderHourlyBox() {
+        // Get per-trade PnL grouped by hour
+        const raw = query(`
+            SELECT CAST(strftime('%H', date) AS INTEGER) as hour, closed_pnl
+            FROM trades
+            WHERE closed_pnl IS NOT NULL AND closed_pnl != 0
+            ORDER BY hour
+        `);
+
+        // Group by hour
+        const byHour = {};
+        for (let h = 0; h < 24; h++) byHour[h] = [];
+        for (const r of raw) {
+            byHour[r.hour].push(r.closed_pnl);
+        }
+
+        // Build box plot data + scatter overlay
+        const labels = Array.from({ length: 24 }, (_, h) => {
+            const kst = (h + 9) % 24;
+            return `${String(h).padStart(2, "0")} UTC\n${String(kst).padStart(2, "0")} KST`;
+        });
+
+        // Box plot dataset
+        const boxData = labels.map((_, h) => {
+            const vals = byHour[h];
+            if (vals.length === 0) return null;
+            // Clamp outliers for box plot visualization (keep scatter for full range)
+            return vals;
+        });
+
+        // Scatter: sample up to 200 points per hour for visibility
+        const scatterData = [];
+        for (let h = 0; h < 24; h++) {
+            let vals = byHour[h];
+            // Sample if too many
+            if (vals.length > 200) {
+                const step = Math.ceil(vals.length / 200);
+                vals = vals.filter((_, i) => i % step === 0);
+            }
+            for (const v of vals) {
+                scatterData.push({ x: h, y: v });
+            }
+        }
+
+        // Compute aggregate for coloring
+        const hourSums = labels.map((_, h) => byHour[h].reduce((s, v) => s + v, 0));
+
+        new Chart(document.getElementById("chart-hourly-box"), {
+            type: "boxplot",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: "P&L Distribution",
+                        data: boxData,
+                        backgroundColor: hourSums.map((s) =>
+                            s >= 0 ? COLORS.green + "40" : COLORS.red + "40"
+                        ),
+                        borderColor: hourSums.map((s) =>
+                            s >= 0 ? COLORS.green + "aa" : COLORS.red + "aa"
+                        ),
+                        borderWidth: 1.5,
+                        outlierRadius: 0, // hide outlier dots (we use scatter)
+                        itemRadius: 0,
+                        medianColor: "#e2e8f0",
+                        meanRadius: 0,
+                    },
+                    {
+                        type: "scatter",
+                        label: "Individual Trades",
+                        data: scatterData,
+                        backgroundColor: scatterData.map((d) =>
+                            d.y >= 0 ? COLORS.green + "30" : COLORS.red + "30"
+                        ),
+                        pointRadius: 1.5,
+                        pointHoverRadius: 4,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            maxRotation: 0,
+                            font: { size: 10 },
+                        },
+                    },
+                    y: {
+                        grid: { color: "#1e2a3a" },
+                        ticks: { callback: (v) => fmt(v) },
+                        // Clamp y-axis to show the interesting range
+                        suggestedMin: -5000,
+                        suggestedMax: 5000,
+                    },
+                },
+                plugins: {
+                    zoom: zoomPanPlugin,
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                if (ctx.dataset.type === "scatter") {
+                                    return `Trade: ${fmt(ctx.raw.y)}`;
+                                }
+                                return ctx.dataset.label;
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
     // ---- Hourly Heatmap ----
     function renderHeatmap() {
         const data = query(`
@@ -584,6 +717,7 @@
                     y: { grid: { color: "#1e2a3a" }, ticks: { callback: (v) => fmt(v) } },
                 },
                 plugins: {
+                    zoom: zoomPanPlugin,
                     tooltip: { callbacks: { label: (ctx) => fmt(ctx.raw) } },
                 },
             },
@@ -609,6 +743,7 @@
             renderWinRate();
             renderBestWorst();
             renderMonthlyTable();
+            renderHourlyBox();
             renderHeatmap();
             renderFunding();
         } catch (e) {

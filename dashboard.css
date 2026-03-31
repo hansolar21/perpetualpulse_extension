@@ -159,6 +159,31 @@ tbody tr:hover { background: var(--bg3); }
 .positive { color: var(--green); }
 .negative { color: var(--red); }
 
+.chart-hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.chart-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.chart-toolbar button {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+}
+.chart-toolbar button:hover { background: var(--border); color: var(--text); }
+
 /* Responsive */
 @media (max-width: 1200px) {
     #summary-cards { grid-template-columns: repeat(3, 1fr); }

@@ -128,6 +128,13 @@
     </section>
 
     <section class="chart-section">
+        <h2>Hourly P&L Distribution <span class="chart-hint">(box plot + individual trades)</span></h2>
+        <div class="chart-container large">
+            <canvas id="chart-hourly-box"></canvas>
+        </div>
+    </section>
+
+    <section class="chart-section">
         <h2>Hourly Activity Heatmap</h2>
         <div class="chart-container">
             <canvas id="chart-heatmap"></canvas>
@@ -143,6 +150,9 @@
 
     <script src="lib/chart.umd.min.js"></script>
     <script src="lib/chartjs-adapter-date-fns.min.js"></script>
+    <script src="lib/hammer.min.js"></script>
+    <script src="lib/chartjs-plugin-zoom.min.js"></script>
+    <script src="lib/chartjs-chart-boxplot.min.js"></script>
     <script src="lib/sql-wasm.js"></script>
     <script src="dashboard.js"></script>
 </body>
