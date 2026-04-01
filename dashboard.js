@@ -781,7 +781,7 @@
     }
 
     // ---- Trade Detail (candlestick + entries/exits) ----
-    const BINANCE_KLINES = "https://api.binance.com/api/v3/klines";
+    const BINANCE_KLINES = "https://fapi.binance.com/fapi/v1/klines";
     // Map Lighter market names to Binance symbols
     function toBinanceSymbol(market) {
         const map = { "BTC": "BTCUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT", "ARB": "ARBUSDT", "DOGE": "DOGEUSDT",
