@@ -744,6 +744,11 @@
             for (const v of sampled) scatterData.push([h + (Math.random() - 0.5) * 0.3, v]);
         }
 
+        // Compute y-axis range from whiskers (not outlier scatter points)
+        let whiskerMin = Infinity, whiskerMax = -Infinity;
+        for (const b of boxData) { whiskerMin = Math.min(whiskerMin, b[0]); whiskerMax = Math.max(whiskerMax, b[4]); }
+        const whiskerPad = (whiskerMax - whiskerMin) * 0.15 || 100;
+
         makeChart("chart-hourly-box").setOption({
             tooltip: { trigger: "item", backgroundColor: C.bg3, borderColor: C.border, textStyle: { color: C.text },
                 formatter: (p) => {
@@ -753,7 +758,7 @@
                 } },
             grid: baseGrid({ bottom: 50 }),
             xAxis: { type: "category", data: hourLabels, axisLabel: { color: C.dim, fontSize: 9, rotate: 45 }, axisLine: { lineStyle: { color: C.border } } },
-            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "value", min: whiskerMin - whiskerPad, max: whiskerMax + whiskerPad, axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
             dataZoom: [{ type: "inside", yAxisIndex: 0 }],
             series: [
                 { type: "boxplot", data: boxData,
