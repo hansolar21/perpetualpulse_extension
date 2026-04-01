@@ -92,6 +92,7 @@
     window.addEventListener("message", async (e) => {
         if (e.source !== window || e.data?.type !== "pp-fetch-transfers") return;
         const { id, accountIndex } = e.data;
+        console.log(`[Perpetualpulse] Page bridge: fetching transfers for account ${accountIndex}`);
         const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer_history";
         const all = [];
         let cursor = undefined;
@@ -100,12 +101,33 @@
             while (pages < 50) {
                 let url = `${BASE}?account_index=${accountIndex}&limit=100`;
                 if (cursor) url += `&cursor=${cursor}`;
-                const headers = {};
+                // Try multiple auth strategies
+                let resp = null;
+                const strategies = [];
+
+                // Strategy 1: captured auth token
                 if (_capturedAuth) {
-                    headers.Authorization = _capturedAuth;
-                    headers.PreferAuthServer = "true";
+                    strategies.push({ name: "captured auth", opts: { headers: { Authorization: _capturedAuth, PreferAuthServer: "true" } } });
                 }
-                const resp = await fetch(url, { headers });
+                // Strategy 2: localStorage auth_token
+                const lsToken = localStorage.getItem("auth_token");
+                if (lsToken) {
+                    strategies.push({ name: "localStorage token", opts: { headers: { Authorization: lsToken } } });
+                }
+                // Strategy 3: localStorage signature_v5
+                const sig = localStorage.getItem("signature_v5");
+                if (sig) {
+                    strategies.push({ name: "signature_v5", opts: { headers: { Authorization: sig } } });
+                }
+                // Strategy 4: cookies only
+                strategies.push({ name: "cookies only", opts: { credentials: "include" } });
+
+                for (const s of strategies) {
+                    resp = await fetch(url, s.opts);
+                    console.log(`[Perpetualpulse] Transfer API [${s.name}]: HTTP ${resp.status}`);
+                    if (resp.ok) break;
+                }
+                if (!resp) resp = await fetch(url);
                 if (!resp.ok) {
                     console.warn(`[Perpetualpulse] Transfer API: HTTP ${resp.status}`);
                     break;
