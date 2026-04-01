@@ -221,6 +221,10 @@ tbody tr:hover { background: var(--bg3); }
 .positive { color: var(--green); }
 .negative { color: var(--red); }
 
+/* Decomp table */
+#table-decomp th.sortable:hover { color: var(--blue); }
+#table-decomp td { white-space: nowrap; }
+
 /* Responsive */
 @media (max-width: 1200px) {
     #summary-cards { grid-template-columns: repeat(4, 1fr); }

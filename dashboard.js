@@ -549,6 +549,119 @@
         });
     }
 
+    function renderPnLDecomp() {
+        // Realized PnL by market
+        const trades = query(`SELECT market, SUM(COALESCE(closed_pnl,0)) as realized, SUM(fee) as fees
+            FROM trades GROUP BY market`);
+        const funding = query(`SELECT market, SUM(payment) as funding FROM funding GROUP BY market`);
+        const fmap = {}; for (const r of funding) fmap[r.market] = r.funding || 0;
+
+        // Merge and compute net
+        const rows = trades.map(r => ({
+            market: r.market,
+            realized: r.realized || 0,
+            fees: r.fees || 0,
+            funding: fmap[r.market] || 0,
+            net: (r.realized || 0) - (r.fees || 0) + (fmap[r.market] || 0),
+        }));
+        // Sort by net ascending (worst at top when reversed for horizontal bar)
+        rows.sort((a, b) => a.net - b.net);
+        // Take top 20 worst and top 20 best
+        const worst20 = rows.slice(0, 20);
+        const best20 = rows.slice(-20);
+        const shown = [...worst20, ...best20.filter(r => !worst20.includes(r))];
+        shown.sort((a, b) => a.net - b.net);
+        const markets = shown.map(r => r.market).reverse();
+
+        makeChart("chart-pnl-decomp").setOption({
+            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" },
+                formatter: (params) => {
+                    const m = params[0].name;
+                    const r = shown.find(x => x.market === m);
+                    if (!r) return m;
+                    return `<b>${m}</b><br/>` +
+                        `Realized: <span style="color:${r.realized >= 0 ? C.green : C.red}">${fmt(r.realized)}</span><br/>` +
+                        `Fees: <span style="color:${C.red}">${fmt(-r.fees)}</span><br/>` +
+                        `Funding: <span style="color:${r.funding >= 0 ? C.green : C.red}">${fmt(r.funding)}</span><br/>` +
+                        `<b>Net: <span style="color:${r.net >= 0 ? C.green : C.red}">${fmt(r.net)}</span></b>`;
+                }
+            },
+            legend: { data: ["Realized", "Funding", "Net"], textStyle: { color: C.text, fontFamily: MONO }, top: 5, itemWidth: 14, itemHeight: 3, icon: "roundRect" },
+            grid: { top: 35, right: 30, bottom: 10, left: 80, containLabel: true },
+            xAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "category", data: markets, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { show: false } },
+            series: [
+                { name: "Realized", type: "bar", stack: "decomp", data: shown.map(r => r.realized).reverse(),
+                  itemStyle: { color: C.blue, borderRadius: 0 }, barMaxWidth: 12 },
+                { name: "Funding", type: "bar", stack: "decomp", data: shown.map(r => r.funding).reverse(),
+                  itemStyle: { color: C.amber, borderRadius: 0 }, barMaxWidth: 12 },
+                { name: "Net", type: "scatter", data: shown.map(r => r.net).reverse(), symbol: "diamond", symbolSize: 8,
+                  itemStyle: { color: "#fff", borderColor: C.bg, borderWidth: 1 } },
+            ],
+        });
+
+        // Decomp table
+        renderDecompTable(rows);
+    }
+
+    function renderDecompTable(rows) {
+        const tbody = document.querySelector("#table-decomp tbody");
+        tbody.innerHTML = "";
+        // Find max absolute value for inline bars
+        const maxAbs = Math.max(...rows.map(r => Math.max(Math.abs(r.realized), Math.abs(r.funding), Math.abs(r.net))), 1);
+        let sortCol = "net", sortAsc = true;
+
+        function render(data) {
+            tbody.innerHTML = "";
+            for (const r of data) {
+                const ratio = r.realized !== 0 ? (r.funding / Math.abs(r.realized) * 100).toFixed(0) + "%" : "—";
+                const tr = document.createElement("tr");
+                // Inline breakdown bar
+                const realW = Math.abs(r.realized) / maxAbs * 100;
+                const fundW = Math.abs(r.funding) / maxAbs * 100;
+                const realColor = r.realized >= 0 ? C.green : C.red;
+                const fundColor = r.funding >= 0 ? C.green : C.red;
+                const bar = `<div style="display:flex;gap:2px;align-items:center;min-width:120px">` +
+                    `<div style="width:${realW}%;height:10px;background:${realColor};border-radius:1px" title="Realized ${fmt(r.realized)}"></div>` +
+                    `<div style="width:${fundW}%;height:10px;background:${fundColor};opacity:0.6;border-radius:1px" title="Funding ${fmt(r.funding)}"></div>` +
+                    `</div>`;
+                tr.innerHTML = `<td>${r.market}</td>` +
+                    `<td class="${pnlClass(r.realized)}">${fmt(r.realized)}</td>` +
+                    `<td class="${pnlClass(-r.fees)}">${fmt(r.fees)}</td>` +
+                    `<td class="${pnlClass(r.funding)}">${fmt(r.funding)}</td>` +
+                    `<td class="${pnlClass(r.net)}"><b>${fmt(r.net)}</b></td>` +
+                    `<td class="${pnlClass(r.funding)}">${ratio}</td>` +
+                    `<td>${bar}</td>`;
+                tbody.appendChild(tr);
+            }
+        }
+
+        function sortAndRender() {
+            const sorted = [...rows].sort((a, b) => {
+                const va = sortCol === "market" ? a.market : (a[sortCol] || 0);
+                const vb = sortCol === "market" ? b.market : (b[sortCol] || 0);
+                if (sortCol === "market") return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+                return sortAsc ? va - vb : vb - va;
+            });
+            render(sorted);
+        }
+
+        // Click handlers on sortable headers
+        document.querySelectorAll("#table-decomp th.sortable").forEach(th => {
+            th.style.cursor = "pointer";
+            th.addEventListener("click", () => {
+                const col = th.dataset.col;
+                if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = col === "market"; }
+                // Update sort indicators
+                document.querySelectorAll("#table-decomp th.sortable").forEach(h => h.textContent = h.textContent.replace(/ [▲▼]/, ""));
+                th.textContent += sortAsc ? " ▲" : " ▼";
+                sortAndRender();
+            });
+        });
+
+        sortAndRender();
+    }
+
     function renderMakerTaker() {
         const data = query(`SELECT role, COUNT(*) as cnt, SUM(trade_value) as volume FROM trades WHERE role IS NOT NULL GROUP BY role`);
         makeChart("chart-maker-taker").setOption({
@@ -712,6 +825,7 @@
             renderDailyPnL();
             renderMarketPnL();
             renderMarketVolume();
+            renderPnLDecomp();
             renderMakerTaker();
             renderWinRate();
             renderBestWorst();
