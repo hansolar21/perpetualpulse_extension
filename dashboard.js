@@ -550,13 +550,11 @@
     }
 
     function renderPnLDecomp() {
-        // Realized PnL by market
         const trades = query(`SELECT market, SUM(COALESCE(closed_pnl,0)) as realized, SUM(fee) as fees
             FROM trades GROUP BY market`);
         const funding = query(`SELECT market, SUM(payment) as funding FROM funding GROUP BY market`);
         const fmap = {}; for (const r of funding) fmap[r.market] = r.funding || 0;
 
-        // Merge and compute net
         const rows = trades.map(r => ({
             market: r.market,
             realized: r.realized || 0,
@@ -564,43 +562,7 @@
             funding: fmap[r.market] || 0,
             net: (r.realized || 0) - (r.fees || 0) + (fmap[r.market] || 0),
         }));
-        // Sort by net ascending (worst at top when reversed for horizontal bar)
-        rows.sort((a, b) => a.net - b.net);
-        // Take top 20 worst and top 20 best
-        const worst20 = rows.slice(0, 20);
-        const best20 = rows.slice(-20);
-        const shown = [...worst20, ...best20.filter(r => !worst20.includes(r))];
-        shown.sort((a, b) => a.net - b.net);
-        const markets = shown.map(r => r.market).reverse();
 
-        makeChart("chart-pnl-decomp").setOption({
-            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" },
-                formatter: (params) => {
-                    const m = params[0].name;
-                    const r = shown.find(x => x.market === m);
-                    if (!r) return m;
-                    return `<b>${m}</b><br/>` +
-                        `Realized: <span style="color:${r.realized >= 0 ? C.green : C.red}">${fmt(r.realized)}</span><br/>` +
-                        `Fees: <span style="color:${C.red}">${fmt(-r.fees)}</span><br/>` +
-                        `Funding: <span style="color:${r.funding >= 0 ? C.green : C.red}">${fmt(r.funding)}</span><br/>` +
-                        `<b>Net: <span style="color:${r.net >= 0 ? C.green : C.red}">${fmt(r.net)}</span></b>`;
-                }
-            },
-            legend: { data: ["Realized", "Funding", "Net"], textStyle: { color: C.text, fontFamily: MONO }, top: 5, itemWidth: 14, itemHeight: 3, icon: "roundRect" },
-            grid: { top: 35, right: 30, bottom: 10, left: 80, containLabel: true },
-            xAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
-            yAxis: { type: "category", data: markets, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { show: false } },
-            series: [
-                { name: "Realized", type: "bar", stack: "decomp", data: shown.map(r => r.realized).reverse(),
-                  itemStyle: { color: C.blue, borderRadius: 0 }, barMaxWidth: 12 },
-                { name: "Funding", type: "bar", stack: "decomp", data: shown.map(r => r.funding).reverse(),
-                  itemStyle: { color: C.amber, borderRadius: 0 }, barMaxWidth: 12 },
-                { name: "Net", type: "scatter", data: shown.map(r => r.net).reverse(), symbol: "diamond", symbolSize: 8,
-                  itemStyle: { color: "#fff", borderColor: C.bg, borderWidth: 1 } },
-            ],
-        });
-
-        // Decomp table
         renderDecompTable(rows);
     }
 
