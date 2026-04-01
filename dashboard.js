@@ -169,14 +169,23 @@
             _equityBaseVals.push(Math.round(cum * 100) / 100);
         }
 
+        // Per-market funding
+        const marketFunding = {};
+        const mf = query(`SELECT market, DATE(date) as day, SUM(payment) as funding FROM funding GROUP BY market, day`);
+        for (const r of mf) {
+            if (!marketFunding[r.market]) marketFunding[r.market] = {};
+            marketFunding[r.market][r.day] = r.funding;
+        }
+
         const markets = query(`SELECT DISTINCT market FROM trades ORDER BY market`);
         _marketDailyPnl = {};
         for (const m of markets) {
             const md = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net
                 FROM trades WHERE market='${m.market}' GROUP BY day ORDER BY day`);
+            const mfMap = marketFunding[m.market] || {};
             let mcum = 0;
             const dayMap = {};
-            for (const r of md) { mcum += r.net; dayMap[r.day] = Math.round(mcum * 100) / 100; }
+            for (const r of md) { mcum += r.net + (mfMap[r.day] || 0); dayMap[r.day] = Math.round(mcum * 100) / 100; }
             _marketDailyPnl[m.market] = dayMap;
         }
     }
@@ -358,23 +367,43 @@
         const netVals = days.map((d) => Math.round(dailySnaps[d].net));
         const grossVals = days.map((d) => Math.round(dailySnaps[d].gross));
 
+        // Build cumulative PnL aligned to exposure days
+        const pnlData = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees
+            FROM trades GROUP BY day ORDER BY day`);
+        const fdData = query(`SELECT DATE(date) as day, SUM(payment) as funding FROM funding GROUP BY day`);
+        const fmap2 = {}; for (const r of fdData) fmap2[r.day] = r.funding;
+        let cumPnl = 0;
+        const cumPnlMap = {};
+        for (const r of pnlData) {
+            cumPnl += r.pnl - r.fees + (fmap2[r.day] || 0);
+            cumPnlMap[r.day] = Math.round(cumPnl * 100) / 100;
+        }
+        // Forward-fill PnL for days with exposure but no trades
+        let lastPnl = 0;
+        const pnlVals = days.map((d) => { if (cumPnlMap[d] !== undefined) lastPnl = cumPnlMap[d]; return lastPnl; });
+
         const seriesList = [
+            { name: "Net Exposure", type: "line", data: netVals, smooth: 0.2, symbol: "none",
+                color: C.blue, itemStyle: { color: C.blue },
+                lineStyle: { color: C.blue, width: 2 } },
+            { name: "Gross Exposure", type: "line", data: grossVals, smooth: 0.2, symbol: "none",
+                color: C.amber, itemStyle: { color: C.amber },
+                lineStyle: { color: C.amber, width: 1.5 },
+                areaStyle: { color: C.amber + "10" } },
             { name: "Long", type: "line", data: longVals, smooth: 0.2, symbol: "none",
                 color: C.green, itemStyle: { color: C.green },
-                lineStyle: { color: C.green, width: 1.5 }, areaStyle: { color: C.green + "15" }, stack: "exposure" },
+                lineStyle: { color: C.green, width: 1.2 } },
             { name: "Short", type: "line", data: shortVals, smooth: 0.2, symbol: "none",
                 color: C.red, itemStyle: { color: C.red },
-                lineStyle: { color: C.red, width: 1.5 }, areaStyle: { color: C.red + "15" }, stack: "exposure" },
-            { name: "Net", type: "line", data: netVals, smooth: 0.2, symbol: "none",
-                color: C.blue, itemStyle: { color: C.blue },
-                lineStyle: { color: C.blue, width: 2, type: "dashed" } },
-            { name: "Gross", type: "line", data: grossVals, smooth: 0.2, symbol: "none",
-                color: C.amber, itemStyle: { color: C.amber },
-                lineStyle: { color: C.amber, width: 1.5, type: "dotted" } },
+                lineStyle: { color: C.red, width: 1.2 } },
+            { name: "Total Net PnL", type: "line", data: pnlVals, smooth: 0.3, symbol: "none",
+                color: C.green, itemStyle: { color: C.green },
+                lineStyle: { color: C.green, width: 2.5 }, yAxisIndex: 1 },
         ];
 
-        const legendNames = ["Long", "Short", "Net", "Gross"];
-        const yAxes = [{ type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } }];
+        const legendNames = ["Net Exposure", "Gross Exposure", "Long", "Short", "Total Net PnL"];
+        // Long and Short hidden by default (click legend to toggle)
+        const legendSelected = { "Long": false, "Short": false, "Net Exposure": true, "Gross Exposure": true, "Total Net PnL": true };
 
         // Add leverage and equity if we have transfer data
         if (hasTransfers) {
@@ -390,12 +419,21 @@
                     lineStyle: { color: C.purple, width: 2 }, yAxisIndex: 0 },
                 { name: "Leverage", type: "line", data: leverageVals, smooth: 0.2, symbol: "none",
                     color: C.cyan, itemStyle: { color: C.cyan },
-                    lineStyle: { color: C.cyan, width: 2 }, yAxisIndex: 1 },
+                    lineStyle: { color: C.cyan, width: 2 }, yAxisIndex: 2 },
             );
             legendNames.push("Equity", "Leverage");
-            yAxes.push({ type: "value", position: "right", name: "Leverage (x)",
-                nameTextStyle: { color: C.cyan }, axisLabel: { color: C.dim, formatter: "{value}x" },
-                splitLine: { show: false } });
+        }
+
+        const yAxes = [
+            { type: "value", name: "Exposure", nameTextStyle: { color: C.dim, fontSize: 10 },
+                axisLabel: { color: C.dim, formatter: (v) => fmt(v), fontFamily: MONO }, splitLine: { lineStyle: { color: C.border } } },
+            { type: "value", position: "right", name: "P&L", nameTextStyle: { color: C.green, fontSize: 10 },
+                axisLabel: { color: C.dim, formatter: (v) => fmt(v), fontFamily: MONO }, splitLine: { show: false } },
+        ];
+        if (hasTransfers) {
+            yAxes.push({ type: "value", position: "right", offset: 60, name: "Leverage",
+                nameTextStyle: { color: C.cyan, fontSize: 10 },
+                axisLabel: { color: C.dim, formatter: "{value}x", fontFamily: MONO }, splitLine: { show: false } });
         }
 
         makeChart("chart-exposure").setOption({
@@ -408,9 +446,10 @@
                 }
                 return s;
             }},
-            legend: { data: legendNames, textStyle: { color: C.dim }, top: 5, icon: "roundRect", itemWidth: 14, itemHeight: 3 },
-            grid: baseGrid({ top: 40, right: hasTransfers ? 80 : 20 }),
-            xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
+            legend: { data: legendNames, selected: legendSelected, textStyle: { color: C.dim, fontFamily: MONO, fontSize: 10 }, top: 5,
+                icon: "roundRect", itemWidth: 14, itemHeight: 3 },
+            grid: baseGrid({ top: 40, right: hasTransfers ? 100 : 80 }),
+            xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10, fontFamily: MONO }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: yAxes,
             dataZoom: dataZoomAutoY(),
             series: seriesList,
