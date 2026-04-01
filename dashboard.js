@@ -803,13 +803,39 @@
             const resp = await fetch(`${BINANCE_KLINES}?${params}`);
             if (!resp.ok) return null;
             const data = await resp.json();
-            // [openTime, open, high, low, close, volume, ...]
+            if (data.code) return null; // API error (invalid symbol etc.)
             return data.map(k => ({
                 time: new Date(k[0]).toISOString().slice(0, 16).replace("T", " "),
                 timeMs: k[0],
                 open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5],
             }));
         } catch { return null; }
+    }
+
+    async function fetchHLKlines(coin, interval, startTime, endTime) {
+        try {
+            const resp = await fetch("https://api.hyperliquid.xyz/info", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: "candleSnapshot", req: { coin, interval, startTime, endTime } }),
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            if (!Array.isArray(data) || !data.length) return null;
+            return data.map(k => ({
+                time: new Date(k.t).toISOString().slice(0, 16).replace("T", " "),
+                timeMs: k.t,
+                open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v,
+            }));
+        } catch { return null; }
+    }
+
+    async function fetchKlines(market, interval, startTime, endTime) {
+        // Try Binance first, then Hyperliquid
+        const binanceSymbol = toBinanceSymbol(market);
+        let klines = await fetchBinanceKlines(binanceSymbol, interval, startTime, endTime);
+        if (klines) return klines;
+        // HL uses different interval format: "1h", "4h", "1d"
+        return fetchHLKlines(market, interval, startTime, endTime);
     }
 
     let _detailChart = null;
@@ -830,9 +856,8 @@
         const lastMs = new Date(trades[trades.length - 1].date).getTime();
         const padMs = (lastMs - firstMs) * 0.05 || 86400000;
 
-        // Try Binance klines
-        const symbol = toBinanceSymbol(market);
-        const klines = await fetchBinanceKlines(symbol, interval, firstMs - padMs, lastMs + padMs);
+        // Try Binance then Hyperliquid
+        const klines = await fetchKlines(market, interval, firstMs - padMs, lastMs + padMs);
 
         // Classify trades as buy/sell
         const buys = [], sells = [];
