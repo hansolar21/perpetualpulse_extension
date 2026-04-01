@@ -388,14 +388,17 @@
             });
 
             if (!resp.ok) {
-                if (resp.status === 403) {
-                    console.warn("[Perpetualpulse] Transfer history: auth required (403)");
-                }
+                console.warn(`[Perpetualpulse] Transfer history: HTTP ${resp.status}`);
                 break;
             }
 
             const data = await resp.json();
-            if (!data.transfers || data.transfers.length === 0) break;
+            if (pages === 0) console.log("[Perpetualpulse] Transfer API response keys:", Object.keys(data));
+            if (!data.transfers || data.transfers.length === 0) {
+                if (pages === 0) console.log("[Perpetualpulse] No transfers in response:", JSON.stringify(data).slice(0, 200));
+                break;
+            }
+            if (pages === 0) console.log("[Perpetualpulse] First transfer:", JSON.stringify(data.transfers[0]));
 
             for (const t of data.transfers) {
                 // Determine type and amount based on transfer direction

@@ -6,11 +6,11 @@
     const charts = [];
 
     const C = {
-        green: "#10b981", red: "#ef4444", blue: "#3b82f6", purple: "#8b5cf6",
-        amber: "#f59e0b", cyan: "#06b6d4", pink: "#ec4899", lime: "#84cc16",
-        orange: "#f97316", teal: "#14b8a6", indigo: "#6366f1", rose: "#f43f5e",
-        bg: "#0a0e17", bg2: "#111827", bg3: "#1a2235", border: "#1e2a3a",
-        text: "#e2e8f0", dim: "#8892a4",
+        green: "#00c853", red: "#ff1744", blue: "#448aff", purple: "#7c4dff",
+        amber: "#ffab00", cyan: "#00e5ff", pink: "#f50057", lime: "#76ff03",
+        orange: "#ff6d00", teal: "#1de9b6", indigo: "#536dfe", rose: "#ff4081",
+        bg: "#0b0e11", bg2: "#12161c", bg3: "#1a1f28", border: "#252a35",
+        text: "#c8ccd4", dim: "#6b7280",
     };
     const PALETTE = [C.blue, C.green, C.purple, C.amber, C.cyan, C.pink, C.lime, C.orange, C.teal, C.indigo, C.rose, C.red];
 
@@ -78,8 +78,9 @@
         });
     }
 
+    const MONO = '"SF Mono", "Fira Code", "JetBrains Mono", "Consolas", monospace';
     function baseGrid(extra = {}) { return { top: 40, right: 20, bottom: 60, left: 70, ...extra }; }
-    function tooltipBase() { return { trigger: "axis", backgroundColor: C.bg3, borderColor: C.border, borderWidth: 1, textStyle: { color: C.text, fontSize: 12 } }; }
+    function tooltipBase() { return { trigger: "axis", backgroundColor: C.bg3 + "f0", borderColor: C.border, borderWidth: 1, textStyle: { color: C.text, fontSize: 11, fontFamily: MONO } }; }
 
     // Tooltip with colored dots
     function fmtTooltip(params) {
@@ -190,10 +191,10 @@
         const hasOverlays = _activeMarkets.size > 0;
 
         const series = [{
-            name: "Total Net P&L", type: "line", data: _equityBaseVals, smooth: 0.3, symbol: "none",
-            lineStyle: { color: C.green, width: 2 },
-            areaStyle: hasOverlays ? undefined : { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + "30" }, { offset: 1, color: C.green + "05" }]) },
-            yAxisIndex: 0, z: 1,
+            name: "TOTAL NET PNL", type: "line", data: _equityBaseVals, smooth: 0.3, symbol: "none",
+            lineStyle: { color: C.green, width: 3 },
+            areaStyle: hasOverlays ? undefined : { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + "20" }, { offset: 1, color: C.green + "02" }]) },
+            yAxisIndex: 0, z: 10,
         }];
 
         let i = 0;
@@ -201,25 +202,19 @@
             const color = PALETTE[(i + 1) % PALETTE.length];
             series.push({
                 name: market, type: "line", data: getMarketSeries(market), smooth: 0.3, symbol: "none",
-                lineStyle: { color, width: 1.5 }, yAxisIndex: 1, z: 2,
+                lineStyle: { color, width: 1.2, opacity: 0.8 }, yAxisIndex: 0, z: 2,
             });
             i++;
         }
 
         _equityChart.setOption({
             tooltip: { ...tooltipBase(), formatter: fmtTooltip },
-            legend: hasOverlays ? { data: series.map((s) => s.name), textStyle: { color: C.dim, fontSize: 10 }, top: 5, type: "scroll",
-                icon: "roundRect", itemWidth: 14, itemHeight: 3 } : { show: false },
-            grid: baseGrid({ top: hasOverlays ? 45 : 30, right: hasOverlays ? 80 : 20 }),
-            xAxis: { type: "category", data: _equityDays, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
+            legend: { data: series.map((s) => s.name), textStyle: { color: C.dim, fontSize: 10, fontFamily: MONO }, top: 5, type: "scroll",
+                icon: "roundRect", itemWidth: 14, itemHeight: 3 },
+            grid: baseGrid({ top: 35 }),
+            xAxis: { type: "category", data: _equityDays, axisLabel: { color: C.dim, fontSize: 10, fontFamily: MONO }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: [
-                { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
-                hasOverlays ? { type: "value", position: "right",
-                    axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { show: false },
-                    // Force 0 to be centered: set min/max symmetrically
-                    min: (value) => { const m = Math.max(Math.abs(value.min), Math.abs(value.max)); return -m; },
-                    max: (value) => { const m = Math.max(Math.abs(value.min), Math.abs(value.max)); return m; },
-                } : { show: false },
+                { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v), fontFamily: MONO }, splitLine: { lineStyle: { color: C.border } } },
             ],
             dataZoom: dataZoomAutoY(),
             series,
@@ -365,12 +360,16 @@
 
         const seriesList = [
             { name: "Long", type: "line", data: longVals, smooth: 0.2, symbol: "none",
+                color: C.green, itemStyle: { color: C.green },
                 lineStyle: { color: C.green, width: 1.5 }, areaStyle: { color: C.green + "15" }, stack: "exposure" },
             { name: "Short", type: "line", data: shortVals, smooth: 0.2, symbol: "none",
+                color: C.red, itemStyle: { color: C.red },
                 lineStyle: { color: C.red, width: 1.5 }, areaStyle: { color: C.red + "15" }, stack: "exposure" },
             { name: "Net", type: "line", data: netVals, smooth: 0.2, symbol: "none",
+                color: C.blue, itemStyle: { color: C.blue },
                 lineStyle: { color: C.blue, width: 2, type: "dashed" } },
             { name: "Gross", type: "line", data: grossVals, smooth: 0.2, symbol: "none",
+                color: C.amber, itemStyle: { color: C.amber },
                 lineStyle: { color: C.amber, width: 1.5, type: "dotted" } },
         ];
 
@@ -387,8 +386,10 @@
 
             seriesList.push(
                 { name: "Equity", type: "line", data: equityVals, smooth: 0.2, symbol: "none",
+                    color: C.purple, itemStyle: { color: C.purple },
                     lineStyle: { color: C.purple, width: 2 }, yAxisIndex: 0 },
                 { name: "Leverage", type: "line", data: leverageVals, smooth: 0.2, symbol: "none",
+                    color: C.cyan, itemStyle: { color: C.cyan },
                     lineStyle: { color: C.cyan, width: 2 }, yAxisIndex: 1 },
             );
             legendNames.push("Equity", "Leverage");
@@ -538,8 +539,8 @@
     }
 
     function renderBestWorst() {
-        const best = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl DESC LIMIT 15`);
-        const worst = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl ASC LIMIT 15`);
+        const best = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl DESC LIMIT 25`);
+        const worst = query(`SELECT market, side, date, trade_value, closed_pnl FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 ORDER BY closed_pnl ASC LIMIT 25`);
         const fillTable = (id, rows) => {
             const tbody = document.querySelector(`#${id} tbody`); tbody.innerHTML = "";
             for (const r of rows) {
@@ -600,7 +601,7 @@
                 } },
             grid: baseGrid({ bottom: 50 }),
             xAxis: { type: "category", data: hourLabels, axisLabel: { color: C.dim, fontSize: 9, rotate: 45 }, axisLine: { lineStyle: { color: C.border } } },
-            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } }, min: -5000, max: 5000 },
+            yAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
             dataZoom: [{ type: "inside", yAxisIndex: 0 }],
             series: [
                 { type: "boxplot", data: boxData,
@@ -626,7 +627,7 @@
                 axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } }, splitArea: { show: true, areaStyle: { color: [C.bg2, C.bg] } } },
             yAxis: { type: "category", data: days, axisLabel: { color: C.text }, axisLine: { show: false } },
             visualMap: { min: 0, max: maxCnt, calculable: true, orient: "vertical", right: 10, top: 10, bottom: 30,
-                inRange: { color: [C.bg2, C.blue + "40", C.blue + "80", C.blue] }, textStyle: { color: C.dim } },
+                inRange: { color: [C.bg2, C.red + "60", C.amber + "60", C.green + "60", C.green] }, textStyle: { color: C.dim } },
             series: [{ type: "heatmap", data: heatData, emphasis: { itemStyle: { shadowBlur: 5, shadowColor: C.blue } } }],
         });
     }
