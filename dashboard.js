@@ -211,7 +211,7 @@
             const color = PALETTE[(i + 1) % PALETTE.length];
             series.push({
                 name: market, type: "line", data: getMarketSeries(market), smooth: 0.3, symbol: "none",
-                lineStyle: { color, width: 1.2, opacity: 0.8 }, yAxisIndex: 0, z: 2,
+                lineStyle: { color, width: 1.2, opacity: 0.8 }, itemStyle: { color }, yAxisIndex: 0, z: 2,
             });
             i++;
         }
