@@ -551,7 +551,8 @@
 
             // Use actual startDate for first range (don't go before account creation)
             const effectiveStart = Math.max(qStartUTC.getTime(), startDate.getTime());
-            ranges.push([effectiveStart, Math.min(qEndUTC.getTime(), endDate.getTime())]);
+            // Always use full quarter end — API requires quarter-aligned boundaries
+            ranges.push([effectiveStart, qEndUTC.getTime()]);
 
             // Advance to next quarter
             month += 3;
@@ -574,7 +575,8 @@
 
             if (mStartUTC.getTime() > endDate.getTime()) break;
             const effectiveStart = Math.max(mStartUTC.getTime(), startDate.getTime());
-            ranges.push([effectiveStart, Math.min(mEndUTC.getTime(), endDate.getTime())]);
+            // Always use full month end — API requires aligned boundaries
+            ranges.push([effectiveStart, mEndUTC.getTime()]);
 
             month++;
             if (month >= 12) { month = 0; year++; }
