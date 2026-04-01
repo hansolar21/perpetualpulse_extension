@@ -780,6 +780,325 @@
         });
     }
 
+    // ---- Trade Detail (candlestick + entries/exits) ----
+    const BINANCE_KLINES = "https://api.binance.com/api/v3/klines";
+    // Map Lighter market names to Binance symbols
+    function toBinanceSymbol(market) {
+        const map = { "BTC": "BTCUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT", "ARB": "ARBUSDT", "DOGE": "DOGEUSDT",
+            "LINK": "LINKUSDT", "AVAX": "AVAXUSDT", "ADA": "ADAUSDT", "XRP": "XRPUSDT", "MATIC": "MATICUSDT",
+            "DOT": "DOTUSDT", "UNI": "UNIUSDT", "ATOM": "ATOMUSDT", "FIL": "FILUSDT", "APT": "APTUSDT",
+            "OP": "OPUSDT", "SUI": "SUIUSDT", "SEI": "SEIUSDT", "TIA": "TIAUSDT", "JUP": "JUPUSDT",
+            "WIF": "WIFUSDT", "PEPE": "PEPEUSDT", "BONK": "BONKUSDT", "NEAR": "NEARUSDT", "INJ": "INJUSDT",
+            "RENDER": "RENDERUSDT", "FET": "FETUSDT", "HYPE": "HYPEUSDT", "ENA": "ENAUSDT", "WLD": "WLDUSDT",
+            "TRUMP": "TRUMPUSDT", "VIRTUAL": "VIRTUALUSDT", "FARTCOIN": "FARTCOINUSDT", "AI16Z": "AI16ZUSDT",
+            "PENGU": "PENGUUSDT", "BNB": "BNBUSDT", "MKR": "MKRUSDT", "AAVE": "AAVEUSDT", "LTC": "LTCUSDT",
+            "BCH": "BCHUSDT", "STRK": "STRKUSDT", "ZEC": "ZECUSDT", "MOVE": "MOVEUSDT", "SPX": "SPXUSDT",
+        };
+        return map[market] || (market + "USDT");
+    }
+
+    async function fetchBinanceKlines(symbol, interval, startTime, endTime) {
+        const params = new URLSearchParams({ symbol, interval, startTime, endTime, limit: "1500" });
+        try {
+            const resp = await fetch(`${BINANCE_KLINES}?${params}`);
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            // [openTime, open, high, low, close, volume, ...]
+            return data.map(k => ({
+                time: new Date(k[0]).toISOString().slice(0, 16).replace("T", " "),
+                timeMs: k[0],
+                open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5],
+            }));
+        } catch { return null; }
+    }
+
+    let _detailChart = null;
+    async function renderTradeDetail(market, interval) {
+        if (!market) return;
+        const el = document.getElementById("chart-detail");
+        if (!_detailChart) { _detailChart = makeChart("chart-detail"); }
+
+        // Get user trades for this market
+        const trades = query(`SELECT date, side, price, size, trade_value, COALESCE(closed_pnl, 0) as pnl
+            FROM trades WHERE market='${market}' ORDER BY date ASC`);
+        if (!trades.length) {
+            _detailChart.setOption({ title: { text: `No trades for ${market}`, left: "center", top: "center", textStyle: { color: C.dim } }, series: [] }, true);
+            return;
+        }
+
+        const firstMs = new Date(trades[0].date).getTime();
+        const lastMs = new Date(trades[trades.length - 1].date).getTime();
+        const padMs = (lastMs - firstMs) * 0.05 || 86400000;
+
+        // Try Binance klines
+        const symbol = toBinanceSymbol(market);
+        const klines = await fetchBinanceKlines(symbol, interval, firstMs - padMs, lastMs + padMs);
+
+        // Classify trades as buy/sell
+        const buys = [], sells = [];
+        for (const t of trades) {
+            const side = t.side.toLowerCase();
+            const isBuy = side.includes("open long") || side.includes("close short") || side === "long" || side === "buy" || side.includes("short > long");
+            const point = { value: [t.date.slice(0, 16).replace("T", " "), t.price], pnl: t.pnl, size: t.size, value_usd: t.trade_value, side: t.side };
+            if (isBuy) buys.push(point); else sells.push(point);
+        }
+
+        const series = [];
+        const xData = [];
+
+        if (klines && klines.length > 0) {
+            // Candlestick chart
+            for (const k of klines) xData.push(k.time);
+            series.push({
+                name: market, type: "candlestick",
+                data: klines.map(k => [k.open, k.close, k.low, k.high]),
+                itemStyle: { color: C.green, color0: C.red, borderColor: C.green, borderColor0: C.red },
+                barMaxWidth: 12,
+            });
+        } else {
+            // No Binance data — use trade prices as line
+            const priceByTime = {};
+            for (const t of trades) {
+                const key = t.date.slice(0, 16).replace("T", " ");
+                priceByTime[key] = t.price;
+            }
+            const sortedTimes = Object.keys(priceByTime).sort();
+            for (const t of sortedTimes) xData.push(t);
+            series.push({
+                name: market + " (trade prices)", type: "line", data: sortedTimes.map(t => priceByTime[t]),
+                symbol: "none", lineStyle: { color: C.blue, width: 1.5 }, smooth: 0.2,
+            });
+        }
+
+        // Buy markers
+        series.push({
+            name: "Buy", type: "scatter", data: buys.map(b => b.value),
+            symbol: "triangle", symbolSize: 10, symbolRotate: 0,
+            itemStyle: { color: C.green, borderColor: "#fff", borderWidth: 1 },
+            z: 20,
+            tooltip: { formatter: (p) => {
+                const b = buys[p.dataIndex];
+                return `<b>BUY</b> ${b.side}<br/>Price: $${b.value[1].toLocaleString()}<br/>Size: ${b.size}<br/>Value: ${fmt(b.value_usd)}${b.pnl ? '<br/>PnL: <b>' + fmt(b.pnl) + '</b>' : ''}`;
+            }},
+        });
+
+        // Sell markers
+        series.push({
+            name: "Sell", type: "scatter", data: sells.map(s => s.value),
+            symbol: "triangle", symbolSize: 10, symbolRotate: 180,
+            itemStyle: { color: C.red, borderColor: "#fff", borderWidth: 1 },
+            z: 20,
+            tooltip: { formatter: (p) => {
+                const s = sells[p.dataIndex];
+                return `<b>SELL</b> ${s.side}<br/>Price: $${s.value[1].toLocaleString()}<br/>Size: ${s.size}<br/>Value: ${fmt(s.value_usd)}${s.pnl ? '<br/>PnL: <b>' + fmt(s.pnl) + '</b>' : ''}`;
+            }},
+        });
+
+        _detailChart.setOption({
+            tooltip: { trigger: "item", backgroundColor: C.bg3 + "f0", borderColor: C.border, textStyle: { color: C.text, fontSize: 11, fontFamily: MONO } },
+            legend: { data: [klines ? market : market + " (trade prices)", "Buy", "Sell"], textStyle: { color: C.dim, fontFamily: MONO }, top: 5, icon: "roundRect", itemWidth: 14, itemHeight: 3 },
+            grid: baseGrid({ top: 35 }),
+            xAxis: { type: "category", data: xData, axisLabel: { color: C.dim, fontSize: 9, fontFamily: MONO }, axisLine: { lineStyle: { color: C.border } }, boundaryGap: true },
+            yAxis: { type: "value", scale: true, axisLabel: { color: C.dim, formatter: (v) => "$" + v.toLocaleString(), fontFamily: MONO }, splitLine: { lineStyle: { color: C.border } } },
+            dataZoom: dataZoomOpts(),
+            series,
+        }, true);
+    }
+
+    function initTradeDetail() {
+        const markets = query(`SELECT DISTINCT market FROM trades ORDER BY market`);
+        const sel = document.getElementById("detail-market");
+        for (const m of markets) {
+            const opt = document.createElement("option");
+            opt.value = m.market; opt.textContent = m.market;
+            sel.appendChild(opt);
+        }
+        sel.addEventListener("change", () => renderTradeDetail(sel.value, document.getElementById("detail-interval").value));
+        document.getElementById("detail-interval").addEventListener("change", () => {
+            if (sel.value) renderTradeDetail(sel.value, document.getElementById("detail-interval").value);
+        });
+    }
+
+    // ---- Trade Duration Analysis ----
+    function reconstructPositions() {
+        // Build round-trip positions per market using FIFO
+        const markets = query(`SELECT DISTINCT market FROM trades ORDER BY market`);
+        const positions = []; // { market, direction, openDate, closeDate, durationMs, pnl, entryPrice, exitPrice, size }
+
+        for (const { market } of markets) {
+            const trades = query(`SELECT date, side, price, size, trade_value, COALESCE(closed_pnl, 0) as pnl
+                FROM trades WHERE market='${market}' ORDER BY date ASC`);
+
+            let pos = 0; // net position (positive = long, negative = short)
+            let openDate = null, openPrice = 0, openSize = 0, cumPnl = 0;
+
+            for (const t of trades) {
+                const side = t.side.toLowerCase();
+                const isBuy = side.includes("open long") || side.includes("close short") || side === "long" || side === "buy" || side.includes("short > long");
+                const delta = isBuy ? Math.abs(t.size) : -Math.abs(t.size);
+                const prevPos = pos;
+                pos += delta;
+
+                // Position opened
+                if (prevPos === 0 && pos !== 0) {
+                    openDate = t.date;
+                    openPrice = t.price;
+                    openSize = Math.abs(t.size);
+                    cumPnl = t.pnl;
+                }
+                // Position changed direction or closed
+                else if ((prevPos > 0 && pos <= 0) || (prevPos < 0 && pos >= 0)) {
+                    cumPnl += t.pnl;
+                    positions.push({
+                        market, direction: prevPos > 0 ? "Long" : "Short",
+                        openDate, closeDate: t.date,
+                        durationMs: new Date(t.date).getTime() - new Date(openDate).getTime(),
+                        pnl: cumPnl, entryPrice: openPrice, exitPrice: t.price, size: openSize,
+                    });
+                    // If flipped (not just closed), start new position
+                    if (pos !== 0) {
+                        openDate = t.date; openPrice = t.price; openSize = Math.abs(pos); cumPnl = 0;
+                    } else {
+                        openDate = null; cumPnl = 0;
+                    }
+                } else {
+                    cumPnl += t.pnl;
+                    // Accumulating — update avg entry or track
+                    if (Math.abs(pos) > openSize) openSize = Math.abs(pos);
+                }
+            }
+        }
+        return positions;
+    }
+
+    function fmtDuration(ms) {
+        if (ms < 60000) return Math.round(ms / 1000) + "s";
+        if (ms < 3600000) return Math.round(ms / 60000) + "m";
+        if (ms < 86400000) return (ms / 3600000).toFixed(1) + "h";
+        return (ms / 86400000).toFixed(1) + "d";
+    }
+
+    function renderDuration() {
+        const positions = reconstructPositions();
+        if (!positions.length) return;
+
+        // Duration histogram
+        const buckets = [
+            { label: "< 1m", max: 60000 }, { label: "1-5m", max: 300000 },
+            { label: "5-30m", max: 1800000 }, { label: "30m-2h", max: 7200000 },
+            { label: "2-8h", max: 28800000 }, { label: "8-24h", max: 86400000 },
+            { label: "1-3d", max: 259200000 }, { label: "3-7d", max: 604800000 },
+            { label: "1-4w", max: 2419200000 }, { label: "> 4w", max: Infinity },
+        ];
+
+        const histData = buckets.map(() => ({ total: 0, wins: 0, pnl: 0 }));
+        for (const p of positions) {
+            const idx = buckets.findIndex(b => p.durationMs < b.max);
+            if (idx >= 0) {
+                histData[idx].total++;
+                if (p.pnl > 0) histData[idx].wins++;
+                histData[idx].pnl += p.pnl;
+            }
+        }
+
+        makeChart("chart-duration-hist").setOption({
+            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" },
+                formatter: (params) => {
+                    const i = params[0].dataIndex;
+                    const h = histData[i];
+                    const wr = h.total ? ((h.wins / h.total) * 100).toFixed(1) + "%" : "—";
+                    return `<b>${buckets[i].label}</b><br/>Positions: ${h.total}<br/>Win Rate: ${wr}<br/>Total PnL: ${fmt(h.pnl)}`;
+                }
+            },
+            grid: { top: 10, right: 20, bottom: 30, left: 50 },
+            xAxis: { type: "category", data: buckets.map(b => b.label), axisLabel: { color: C.dim, fontSize: 9, rotate: 30 }, axisLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "value", axisLabel: { color: C.dim }, splitLine: { lineStyle: { color: C.border } } },
+            series: [{ type: "bar", data: histData.map(h => h.total),
+                itemStyle: { color: (p) => histData[p.dataIndex].pnl >= 0 ? C.green : C.red, borderRadius: [2, 2, 0, 0] }, barMaxWidth: 30 }],
+        });
+
+        // Avg duration by market (top 20 by position count)
+        const byMarket = {};
+        for (const p of positions) {
+            if (!byMarket[p.market]) byMarket[p.market] = { durations: [], pnls: [], wins: 0, total: 0, longWins: 0, longTotal: 0, shortWins: 0, shortTotal: 0 };
+            const m = byMarket[p.market];
+            m.durations.push(p.durationMs); m.pnls.push(p.pnl); m.total++;
+            if (p.pnl > 0) m.wins++;
+            if (p.direction === "Long") { m.longTotal++; if (p.pnl > 0) m.longWins++; }
+            else { m.shortTotal++; if (p.pnl > 0) m.shortWins++; }
+        }
+
+        const marketStats = Object.entries(byMarket).map(([market, m]) => {
+            m.durations.sort((a, b) => a - b);
+            const avg = m.durations.reduce((s, d) => s + d, 0) / m.durations.length;
+            const med = m.durations[Math.floor(m.durations.length / 2)];
+            const avgPnl = m.pnls.reduce((s, p) => s + p, 0) / m.pnls.length;
+            return { market, trades: m.total, avgDur: avg, medDur: med,
+                winRate: m.total ? m.wins / m.total : 0, avgPnl,
+                shortWin: m.shortTotal ? m.shortWins / m.shortTotal : null,
+                longWin: m.longTotal ? m.longWins / m.longTotal : null, ...m };
+        }).sort((a, b) => b.trades - a.trades);
+
+        const top20 = marketStats.slice(0, 20);
+        makeChart("chart-duration-market").setOption({
+            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" },
+                formatter: (p) => { const m = top20.find(x => x.market === p[0].name); return m ? `<b>${m.market}</b><br/>Avg: ${fmtDuration(m.avgDur)}<br/>Med: ${fmtDuration(m.medDur)}<br/>Positions: ${m.trades}` : ""; }
+            },
+            grid: { top: 10, right: 20, bottom: 10, left: 80, containLabel: true },
+            xAxis: { type: "value", name: "Hours", axisLabel: { color: C.dim, formatter: (v) => v.toFixed(0) + "h" }, splitLine: { lineStyle: { color: C.border } } },
+            yAxis: { type: "category", data: top20.map(m => m.market).reverse(), axisLabel: { color: C.text, fontSize: 10 }, axisLine: { show: false } },
+            series: [
+                { name: "Avg Duration", type: "bar", data: top20.map(m => +(m.avgDur / 3600000).toFixed(1)).reverse(),
+                    itemStyle: { color: C.blue, borderRadius: [0, 2, 2, 0] }, barMaxWidth: 12 },
+                { name: "Median", type: "scatter", data: top20.map(m => +(m.medDur / 3600000).toFixed(1)).reverse(),
+                    symbol: "diamond", symbolSize: 8, itemStyle: { color: C.amber } },
+            ],
+        });
+
+        // Duration table with sorting
+        const tbody = document.querySelector("#table-duration tbody");
+        let sortCol = "trades", sortAsc = false;
+
+        function render(data) {
+            tbody.innerHTML = "";
+            for (const m of data) {
+                const tr = document.createElement("tr");
+                const wr = (m.winRate * 100).toFixed(1) + "%";
+                const lw = m.longWin !== null ? (m.longWin * 100).toFixed(1) + "%" : "—";
+                const sw = m.shortWin !== null ? (m.shortWin * 100).toFixed(1) + "%" : "—";
+                tr.innerHTML = `<td>${m.market}</td><td>${m.trades}</td><td>${fmtDuration(m.avgDur)}</td><td>${fmtDuration(m.medDur)}</td>` +
+                    `<td class="${m.winRate >= 0.5 ? 'positive' : 'negative'}">${wr}</td>` +
+                    `<td class="${pnlClass(m.avgPnl)}">${fmt(m.avgPnl)}</td>` +
+                    `<td class="${m.shortWin !== null && m.shortWin >= 0.5 ? 'positive' : 'negative'}">${sw}</td>` +
+                    `<td class="${m.longWin !== null && m.longWin >= 0.5 ? 'positive' : 'negative'}">${lw}</td>`;
+                tbody.appendChild(tr);
+            }
+        }
+
+        function sortAndRender() {
+            const sorted = [...marketStats].sort((a, b) => {
+                const va = sortCol === "market" ? a.market : (a[sortCol] ?? 0);
+                const vb = sortCol === "market" ? b.market : (b[sortCol] ?? 0);
+                if (sortCol === "market") return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+                return sortAsc ? va - vb : vb - va;
+            });
+            render(sorted);
+        }
+
+        document.querySelectorAll("#table-duration th.sortable").forEach(th => {
+            th.style.cursor = "pointer";
+            th.addEventListener("click", () => {
+                const col = th.dataset.col;
+                if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = col === "market"; }
+                document.querySelectorAll("#table-duration th.sortable").forEach(h => h.textContent = h.textContent.replace(/ [▲▼]/, ""));
+                th.textContent += sortAsc ? " ▲" : " ▼";
+                sortAndRender();
+            });
+        });
+
+        sortAndRender();
+    }
+
     // ---- Init ----
     async function init() {
         try {
@@ -797,6 +1116,8 @@
             renderWinRate();
             renderBestWorst();
             renderMonthlyTable();
+            initTradeDetail();
+            renderDuration();
             renderHourlyBox();
             renderHeatmap();
             renderFunding();

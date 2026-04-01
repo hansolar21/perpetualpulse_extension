@@ -221,6 +221,15 @@ tbody tr:hover { background: var(--bg3); }
 .positive { color: var(--green); }
 .negative { color: var(--red); }
 
+/* Detail controls */
+.detail-controls { display: flex; gap: 8px; margin-bottom: 12px; }
+.detail-controls select {
+    background: var(--bg2); color: var(--text); border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: 2px; font-family: var(--font); font-size: 12px;
+    cursor: pointer;
+}
+.detail-controls select:hover { border-color: var(--blue); }
+
 /* Decomp table */
 #table-decomp th.sortable:hover { color: var(--blue); }
 #table-decomp td { white-space: nowrap; }

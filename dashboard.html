@@ -157,6 +157,44 @@
     </section>
 
     <section class="chart-section">
+        <h2>Trade Detail</h2>
+        <div class="detail-controls">
+            <select id="detail-market"><option value="">Select market...</option></select>
+            <select id="detail-interval">
+                <option value="1h">1H</option>
+                <option value="4h" selected>4H</option>
+                <option value="1d">1D</option>
+            </select>
+        </div>
+        <div class="echart large" id="chart-detail"></div>
+    </section>
+
+    <section class="chart-section">
+        <h2>Trade Duration Analysis</h2>
+        <div class="two-col">
+            <div class="echart medium" id="chart-duration-hist"></div>
+            <div class="echart medium" id="chart-duration-market"></div>
+        </div>
+        <div class="table-wrap" style="margin-top:16px">
+            <table id="table-duration">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-col="market">Market</th>
+                        <th class="sortable" data-col="trades">Round Trips</th>
+                        <th class="sortable" data-col="avgDur">Avg Duration</th>
+                        <th class="sortable" data-col="medDur">Med Duration</th>
+                        <th class="sortable" data-col="winRate">Win Rate</th>
+                        <th class="sortable" data-col="avgPnl">Avg P&L</th>
+                        <th class="sortable" data-col="shortWin">Short Win%</th>
+                        <th class="sortable" data-col="longWin">Long Win%</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="chart-section">
         <h2>Hourly P&L Distribution</h2>
         <div class="echart large" id="chart-hourly-box"></div>
     </section>
