@@ -16,7 +16,8 @@
     "https://mainnet.zklighter.elliot.ai/*",
     "https://app.hyperliquid.xyz/*",
     "https://api.hyperliquid.xyz/*",
-    "https://api.binance.com/*"
+    "https://api.binance.com/*",
+    "https://fapi.binance.com/*"
   ],
   "content_scripts": [
     {
