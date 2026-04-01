@@ -368,76 +368,49 @@
         return added;
     }
 
-    // Fetch transfer history from REST API (paginated)
+    // Fetch transfer history via page bridge (MAIN world has cookies for auth)
     async function fetchTransferHistory(authToken, accountIndex) {
-        const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer_history";
-        const transfers = [];
-        let cursor = undefined;
-        let pages = 0;
+        return new Promise((resolve) => {
+            const id = "pp-tf-" + Math.random().toString(36).slice(2);
+            const handler = (e) => {
+                if (e.source !== window || e.data?.type !== "pp-fetch-transfers-result" || e.data.id !== id) return;
+                window.removeEventListener("message", handler);
 
-        while (pages < 50) { // safety limit
-            let url = `${BASE}?account_index=${accountIndex}&limit=100`;
-            if (cursor) url += `&cursor=${cursor}`;
+                const raw = e.data.transfers || [];
+                console.log(`[Perpetualpulse] Got ${raw.length} raw transfers from page bridge`);
 
-            const resp = await fetch(url, {
-                headers: {
-                    Authorization: authToken,
-                    PreferAuthServer: "true",
-                    Origin: "https://app.lighter.xyz",
-                },
-            });
+                const transfers = [];
+                for (const t of raw) {
+                    let type = t.type || "Unknown";
+                    let amount = 0;
+                    const ts = t.timestamp || t.created_at || t.date || "";
+                    const date = ts ? new Date(typeof ts === "number" ? ts * 1000 : ts).toISOString() : "";
 
-            if (!resp.ok) {
-                console.warn(`[Perpetualpulse] Transfer history: HTTP ${resp.status}`);
-                break;
-            }
+                    if (t.l1_tx_hash || type.toLowerCase().includes("deposit")) {
+                        type = "Deposit";
+                        amount = parseFloat(t.amount || t.collateral || 0);
+                    } else if (type.toLowerCase().includes("withdraw")) {
+                        type = "Withdrawal";
+                        amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
+                    } else if (type.toLowerCase().includes("inflow") || type.toLowerCase().includes("transfer_in")) {
+                        type = "TransferIn";
+                        amount = parseFloat(t.amount || t.collateral || 0);
+                    } else if (type.toLowerCase().includes("outflow") || type.toLowerCase().includes("transfer_out")) {
+                        type = "TransferOut";
+                        amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
+                    } else {
+                        amount = parseFloat(t.amount || t.collateral || t.value || 0);
+                    }
 
-            const data = await resp.json();
-            if (pages === 0) console.log("[Perpetualpulse] Transfer API response keys:", Object.keys(data));
-            if (!data.transfers || data.transfers.length === 0) {
-                if (pages === 0) console.log("[Perpetualpulse] No transfers in response:", JSON.stringify(data).slice(0, 200));
-                break;
-            }
-            if (pages === 0) console.log("[Perpetualpulse] First transfer:", JSON.stringify(data.transfers[0]));
-
-            for (const t of data.transfers) {
-                // Determine type and amount based on transfer direction
-                let type = t.type || "Unknown";
-                let amount = 0;
-                const ts = t.timestamp || t.created_at || t.date || "";
-                const date = ts ? new Date(typeof ts === "number" ? ts * 1000 : ts).toISOString() : "";
-
-                // Map transfer types
-                if (t.l1_tx_hash || type.toLowerCase().includes("deposit")) {
-                    type = "Deposit";
-                    amount = parseFloat(t.amount || t.collateral || 0);
-                } else if (type.toLowerCase().includes("withdraw")) {
-                    type = "Withdrawal";
-                    amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
-                } else if (type.toLowerCase().includes("inflow") || type.toLowerCase().includes("transfer_in")) {
-                    type = "TransferIn";
-                    amount = parseFloat(t.amount || t.collateral || 0);
-                } else if (type.toLowerCase().includes("outflow") || type.toLowerCase().includes("transfer_out")) {
-                    type = "TransferOut";
-                    amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
-                } else {
-                    // Generic — try to parse amount with sign
-                    amount = parseFloat(t.amount || t.collateral || t.value || 0);
+                    if (date && amount !== 0) transfers.push({ date, type, amount });
                 }
-
-                if (date && amount !== 0) {
-                    transfers.push({ date, type, amount });
-                }
-            }
-
-            cursor = data.cursor;
-            if (!cursor) break;
-            pages++;
-            await new Promise((r) => setTimeout(r, 300));
-        }
-
-        console.log(`[Perpetualpulse] Fetched ${transfers.length} transfers from REST API (${pages + 1} pages)`);
-        return transfers;
+                resolve(transfers);
+            };
+            window.addEventListener("message", handler);
+            window.postMessage({ type: "pp-fetch-transfers", id, accountIndex });
+            // Timeout
+            setTimeout(() => { window.removeEventListener("message", handler); resolve([]); }, 60000);
+        });
     }
 
     // ---------- FIFO PnL Reconstruction ----------

@@ -88,5 +88,46 @@
         winRate: () => callTradeDB("winRate"),
     };
 
+    // --- Fetch transfer history from MAIN world (has cookies) ---
+    window.addEventListener("message", async (e) => {
+        if (e.source !== window || e.data?.type !== "pp-fetch-transfers") return;
+        const { id, accountIndex } = e.data;
+        const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer_history";
+        const all = [];
+        let cursor = undefined;
+        let pages = 0;
+        try {
+            while (pages < 50) {
+                let url = `${BASE}?account_index=${accountIndex}&limit=100`;
+                if (cursor) url += `&cursor=${cursor}`;
+                const headers = {};
+                if (_capturedAuth) {
+                    headers.Authorization = _capturedAuth;
+                    headers.PreferAuthServer = "true";
+                }
+                const resp = await fetch(url, { headers });
+                if (!resp.ok) {
+                    console.warn(`[Perpetualpulse] Transfer API: HTTP ${resp.status}`);
+                    break;
+                }
+                const data = await resp.json();
+                if (pages === 0) console.log("[Perpetualpulse] Transfer API keys:", Object.keys(data));
+                if (!data.transfers || data.transfers.length === 0) {
+                    if (pages === 0) console.log("[Perpetualpulse] No transfers:", JSON.stringify(data).slice(0, 300));
+                    break;
+                }
+                if (pages === 0) console.log("[Perpetualpulse] First transfer:", JSON.stringify(data.transfers[0]));
+                all.push(...data.transfers);
+                cursor = data.cursor;
+                if (!cursor) break;
+                pages++;
+                await new Promise(r => setTimeout(r, 300));
+            }
+        } catch (err) {
+            console.error("[Perpetualpulse] Transfer fetch error:", err);
+        }
+        window.postMessage({ type: "pp-fetch-transfers-result", id, transfers: all });
+    });
+
     console.log("[Perpetualpulse] Page bridge active (fetch interceptor + _PP_TradeDB console API)");
 })();
