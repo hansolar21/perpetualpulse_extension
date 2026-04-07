@@ -189,9 +189,9 @@ function computeRiskMetrics(positions, equity) {
         survivalProduct *= (1 - liqProb);
     }
 
-    const netPosition = totalLong - totalShort;
     const netBetaNum = longBetaSum - shortBetaSum;
-    const netBeta = netPosition ? netBetaNum / netPosition : 0;
+    // Net beta as % of equity: how much the portfolio moves per 1% market move
+    const netBeta = equity ? netBetaNum / equity : 0;
     const valueAtRisk = varTotal ? varCurrent / varTotal : 0;
     const probLiq = 1 - survivalProduct;
 
