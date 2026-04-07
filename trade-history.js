@@ -33,12 +33,23 @@
             };
             window.addEventListener("message", handler);
             window.postMessage({ type: "pp-get-auth", id });
+            setTimeout(() => { window.removeEventListener("message", handler); resolve({ token: null, accountIndex: null }); }, 2000);
+        });
+    }
 
-            // Timeout after 2s
-            setTimeout(() => {
-                window.removeEventListener("message", handler);
-                resolve({ token: null, accountIndex: null });
-            }, 2000);
+    // Generate fresh auth token via Lighter's WASM (stronger than captured token)
+    function generateFreshAuth(accountIndex) {
+        return new Promise((resolve) => {
+            const id = "pp-gen-" + Math.random().toString(36).slice(2);
+            const handler = (e) => {
+                if (e.data?.type === "pp-generate-auth-result" && e.data.id === id) {
+                    window.removeEventListener("message", handler);
+                    resolve(e.data.token);
+                }
+            };
+            window.addEventListener("message", handler);
+            window.postMessage({ type: "pp-generate-auth", id, accountIndex });
+            setTimeout(() => { window.removeEventListener("message", handler); resolve(null); }, 5000);
         });
     }
 
@@ -668,9 +679,10 @@
                 await new Promise((r) => setTimeout(r, 300));
             }
 
-            // Sync transfers via REST API (paginated)
+            // Sync transfers — generate a fresh token via WASM for best auth
             try {
-                const transfers = await fetchTransferHistory(authToken, accountIndex);
+                const freshToken = await generateFreshAuth(accountIndex) || authToken;
+                const transfers = await fetchTransferHistory(freshToken, accountIndex);
                 if (transfers.length > 0) {
                     const added = insertTransferObjects(transfers);
                     console.log(`[Perpetualpulse] +${added} new transfers (${transfers.length} total fetched)`);

@@ -284,12 +284,15 @@
     }
 
     // ---- Position Exposure Chart ----
-    function renderExposure() {
+    async function renderExposure() {
         const trades = query(`SELECT date, market, side, trade_value, size, price FROM trades ORDER BY date ASC`);
 
         // Try to get transfers for equity calculation
         const transfers = query(`SELECT date, type, amount FROM transfers ORDER BY date ASC`);
         const hasTransfers = transfers.length > 0;
+        // Load initial equity from settings (fallback when no transfers)
+        const _settings = await new Promise(r => chrome.storage.local.get(["pp_settings"], d => r(d.pp_settings || {})));
+        const initialEquity = parseFloat(_settings.initial_equity) || 0;
 
         const positions = {};
         const dailySnaps = {};
@@ -320,8 +323,16 @@
             }
             dailySnaps[day] = { long: longN, short: -shortN, gross: longN + shortN, net: longN - shortN };
 
-            // Update equity
-            equity += (transfersByDay[day] || 0) + (dailyRealizedPnl[day] || 0);
+            // Update equity (use transfers if available, else proxy from initialEquity + cumPnL)
+            if (hasTransfers) {
+                equity += (transfersByDay[day] || 0) + (dailyRealizedPnl[day] || 0);
+            } else if (initialEquity > 0) {
+                // Proxy: starting equity + cumulative PnL
+                const cumPnlSoFar = Object.entries(dailyRealizedPnl)
+                    .filter(([d]) => d <= day)
+                    .reduce((s, [, v]) => s + v, 0);
+                equity = initialEquity + cumPnlSoFar;
+            }
             dailyEquity[day] = equity;
         };
 
@@ -405,8 +416,9 @@
         // Long and Short hidden by default (click legend to toggle)
         const legendSelected = { "Long": false, "Short": false, "Net Exposure": true, "Gross Exposure": true, "Total Net PnL": true };
 
-        // Add leverage and equity if we have transfer data
-        if (hasTransfers) {
+        // Add leverage and equity if we have transfer data OR proxy equity from settings
+        const hasEquity = hasTransfers || initialEquity > 0;
+        if (hasEquity) {
             const equityVals = days.map((d) => Math.round(dailyEquity[d] || 0));
             const leverageVals = days.map((d) => {
                 const eq = dailyEquity[d] || 0;
@@ -430,7 +442,7 @@
             { type: "value", position: "right", name: "P&L", nameTextStyle: { color: C.green, fontSize: 10 },
                 axisLabel: { color: C.dim, formatter: (v) => fmt(v), fontFamily: MONO }, splitLine: { show: false } },
         ];
-        if (hasTransfers) {
+        if (hasEquity) {
             yAxes.push({ type: "value", position: "right", offset: 60, name: "Leverage",
                 nameTextStyle: { color: C.cyan, fontSize: 10 },
                 axisLabel: { color: C.dim, formatter: "{value}x", fontFamily: MONO }, splitLine: { show: false } });
@@ -448,7 +460,7 @@
             }},
             legend: { data: legendNames, selected: legendSelected, textStyle: { color: C.dim, fontFamily: MONO, fontSize: 10 }, top: 5,
                 icon: "roundRect", itemWidth: 14, itemHeight: 3 },
-            grid: baseGrid({ top: 40, right: hasTransfers ? 100 : 80 }),
+            grid: baseGrid({ top: 40, right: hasEquity ? 100 : 80 }),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10, fontFamily: MONO }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: yAxes,
             dataZoom: dataZoomAutoY(),
@@ -1131,7 +1143,7 @@
             if (!_db) { document.getElementById("status-text").textContent = "No trade data. Open app.lighter.xyz first to sync."; return; }
             renderSummary();
             renderEquityCurve();
-            renderExposure();
+            await renderExposure();
             renderTransfers();
             renderDailyPnL();
             renderMarketPnL();
@@ -1159,5 +1171,33 @@
             setTimeout(() => { chrome.tabs.remove(tab.id); location.reload(); }, 30000);
         });
     });
+
+    // --- Settings Modal ---
+    const overlay = document.getElementById("settings-overlay");
+    document.getElementById("btn-settings").addEventListener("click", () => {
+        // Load saved settings
+        chrome.storage.local.get(["pp_settings"], (data) => {
+            const s = data.pp_settings || {};
+            document.getElementById("setting-initial-equity").value = s.initial_equity || "";
+            document.getElementById("setting-auth-token").value = s.auth_token || "";
+        });
+        overlay.style.display = "flex"; overlay.style.alignItems = "center"; overlay.style.justifyContent = "center";
+    });
+    document.getElementById("btn-settings-close").addEventListener("click", () => {
+        overlay.style.display = "none";
+    });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
+    document.getElementById("btn-settings-save").addEventListener("click", () => {
+        const s = {
+            initial_equity: document.getElementById("setting-initial-equity").value,
+            auth_token: document.getElementById("setting-auth-token").value.trim(),
+        };
+        chrome.storage.local.set({ pp_settings: s }, () => {
+            const el = document.getElementById("settings-status");
+            el.textContent = "✓ Saved";
+            setTimeout(() => { el.textContent = ""; overlay.style.display = "none"; location.reload(); }, 1200);
+        });
+    });
+
     init();
 })();

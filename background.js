@@ -11,12 +11,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         let cursor = undefined;
         let pages = 0;
 
-        // Try auth strategies
+        // Load stored auth token from settings as extra fallback
+        const stored = await new Promise(r => chrome.storage.local.get(["pp_settings"], d => r((d.pp_settings || {}).auth_token || null)));
+
+        // Try auth strategies: provided token, stored token, no auth
+        const tokens = [authToken, stored].filter(Boolean);
         const authHeaders = [
-            authToken ? { Authorization: authToken, PreferAuthServer: "true" } : null,
-            authToken ? { Authorization: authToken } : null,
+            ...tokens.map(t => ({ Authorization: t, PreferAuthServer: "true" })),
+            ...tokens.map(t => ({ Authorization: t })),
             {}, // no auth
-        ].filter(Boolean);
+        ].filter((h, i, arr) => i === arr.findIndex(x => JSON.stringify(x) === JSON.stringify(h)));
 
         try {
             while (pages < 50) {

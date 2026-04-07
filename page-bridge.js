@@ -151,5 +151,27 @@
         window.postMessage({ type: "pp-fetch-transfers-result", id, transfers: all });
     });
 
+    // --- Generate fresh auth token via Lighter's own WASM ---
+    window.addEventListener("message", async (e) => {
+        if (e.source !== window || e.data?.type !== "pp-generate-auth") return;
+        const { id, accountIndex } = e.data;
+        let token = null;
+        try {
+            // 1. Read-only token in localStorage (set via Lighter Settings → API)
+            token = localStorage.getItem("auth_token");
+            // 2. Generate via WASM (same function Lighter uses internally)
+            if (!token && window._createAuthToken) {
+                const factory = await window._createAuthToken(accountIndex, "desktop");
+                const result = await factory();
+                if (result && !result.error) token = result.token;
+            }
+            // 3. Fall back to captured token from fetch interceptor
+            if (!token) token = _capturedAuth;
+        } catch (err) {
+            console.warn("[Perpetualpulse] Auth token generation failed:", err);
+        }
+        window.postMessage({ type: "pp-generate-auth-result", id, token });
+    });
+
     console.log("[Perpetualpulse] Page bridge active (fetch interceptor + _PP_TradeDB console API)");
 })();
