@@ -16,29 +16,28 @@
     </header>
 
     <!-- Settings Modal -->
-    <div id="settings-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center">
-        <div style="background:#161b22;border:1px solid #30363d;border-radius:4px;padding:24px;min-width:420px;max-width:560px;font-family:var(--font)">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-                <span style="font-size:13px;font-weight:600;letter-spacing:0.08em;color:#e6edf3">⚙ SETTINGS</span>
-                <button id="btn-settings-close" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:16px">✕</button>
+    <div id="settings-overlay" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span>⚙ SETTINGS</span>
+                <button id="btn-settings-close" class="modal-close">✕</button>
             </div>
-            <div style="display:flex;flex-direction:column;gap:16px">
-                <div>
-                    <label style="display:block;font-size:11px;letter-spacing:0.08em;color:#8b949e;margin-bottom:6px">INITIAL EQUITY (USDC)</label>
-                    <input id="setting-initial-equity" type="number" placeholder="e.g. 50000"
-                        style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:8px 10px;font-family:var(--font);font-size:12px;border-radius:2px;box-sizing:border-box" />
-                    <span style="font-size:10px;color:#6e7681;margin-top:4px;display:block">Starting capital for leverage calculation when no transfer history</span>
+            <div class="modal-body">
+                <div class="setting-row">
+                    <label class="setting-label">INITIAL EQUITY (USDC)</label>
+                    <input id="setting-initial-equity" class="setting-input" type="number" placeholder="e.g. 50000" />
+                    <span class="setting-hint">Starting capital — unlocks leverage chart when no deposit history is available</span>
                 </div>
-                <div>
-                    <label style="display:block;font-size:11px;letter-spacing:0.08em;color:#8b949e;margin-bottom:6px">MANUAL AUTH TOKEN</label>
-                    <input id="setting-auth-token" type="text" placeholder="Paste Lighter auth token (fallback for transfer sync)"
-                        style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:8px 10px;font-family:var(--font);font-size:11px;border-radius:2px;box-sizing:border-box" />
-                    <span style="font-size:10px;color:#6e7681;margin-top:4px;display:block">From Lighter → Network tab → any export request → Authorization header</span>
+                <div class="setting-row">
+                    <label class="setting-label">READ-ONLY API TOKEN</label>
+                    <div class="setting-warning">⚠ Only paste a read-only API key. Never use a key with trading permissions.</div>
+                    <input id="setting-auth-token" class="setting-input" type="password" placeholder="timestamp:account:keyindex:signature" />
+                    <span class="setting-hint">Lighter → Settings → API Keys → Generate read-only key → copy auth token</span>
                 </div>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;margin-top:20px">
-                <button id="btn-settings-save" style="background:#1f6feb;border:none;color:#fff;padding:8px 16px;font-family:var(--font);font-size:12px;cursor:pointer;border-radius:2px;letter-spacing:0.05em">SAVE</button>
-                <span id="settings-status" style="font-size:11px;color:#00c853"></span>
+            <div class="modal-footer">
+                <button id="btn-settings-save" class="btn btn-primary">SAVE</button>
+                <span id="settings-status" class="settings-status-msg"></span>
             </div>
         </div>
     </div>
@@ -92,7 +91,11 @@
     </section>
 
     <section class="chart-section">
-        <h2>Deposits & Withdrawals</h2>
+        <div class="section-header">
+            <h2>Deposits &amp; Withdrawals</h2>
+            <button id="btn-sync-transfers" class="btn btn-sm" title="Sync deposit/withdrawal history">↻ Sync</button>
+            <span id="transfer-sync-status" class="sync-status-msg"></span>
+        </div>
         <div class="echart" id="chart-transfers"></div>
     </section>
 

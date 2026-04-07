@@ -1174,18 +1174,16 @@
 
     // --- Settings Modal ---
     const overlay = document.getElementById("settings-overlay");
-    document.getElementById("btn-settings").addEventListener("click", () => {
-        // Load saved settings
+    function openSettings() {
         chrome.storage.local.get(["pp_settings"], (data) => {
             const s = data.pp_settings || {};
             document.getElementById("setting-initial-equity").value = s.initial_equity || "";
             document.getElementById("setting-auth-token").value = s.auth_token || "";
         });
-        overlay.style.display = "flex"; overlay.style.alignItems = "center"; overlay.style.justifyContent = "center";
-    });
-    document.getElementById("btn-settings-close").addEventListener("click", () => {
-        overlay.style.display = "none";
-    });
+        overlay.style.display = "flex";
+    }
+    document.getElementById("btn-settings").addEventListener("click", openSettings);
+    document.getElementById("btn-settings-close").addEventListener("click", () => { overlay.style.display = "none"; });
     overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
     document.getElementById("btn-settings-save").addEventListener("click", () => {
         const s = {
@@ -1193,9 +1191,24 @@
             auth_token: document.getElementById("setting-auth-token").value.trim(),
         };
         chrome.storage.local.set({ pp_settings: s }, () => {
-            const el = document.getElementById("settings-status");
-            el.textContent = "✓ Saved";
-            setTimeout(() => { el.textContent = ""; overlay.style.display = "none"; location.reload(); }, 1200);
+            const statusEl = document.getElementById("settings-status");
+            statusEl.textContent = "✓ Saved";
+            setTimeout(() => { statusEl.textContent = ""; overlay.style.display = "none"; location.reload(); }, 1200);
+        });
+    });
+
+    // --- Deposits & Withdrawals separate sync ---
+    document.getElementById("btn-sync-transfers").addEventListener("click", () => {
+        const statusEl = document.getElementById("transfer-sync-status");
+        statusEl.textContent = "Opening Lighter...";
+        chrome.tabs.create({ url: "https://app.lighter.xyz/portfolio", active: false }, (tab) => {
+            statusEl.textContent = "Syncing transfers...";
+            // Give the page time to load WASM and run sync, then close
+            setTimeout(() => {
+                chrome.tabs.remove(tab.id);
+                statusEl.textContent = "Done — reloading...";
+                setTimeout(() => location.reload(), 1000);
+            }, 35000);
         });
     });
 
