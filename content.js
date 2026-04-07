@@ -86,28 +86,49 @@ async function fetchRiskConstants() {
 
         const js = await (await fetch(bundleUrl)).text();
 
-        // Parse constants: kLe (beta), xLe (volatility), wLe (drift)
-        function parseObj(name) {
-            const re = new RegExp(name + '=\\{([^}]+)\\}');
-            const m = js.match(re);
-            if (!m) return {};
+        // Parse ALL numeric-keyed objects from the bundle, then classify by value range
+        // (variable names change every Lighter deploy, so detect by content instead)
+        const allObjs = {};
+        const objRe = /([A-Za-z_$][A-Za-z0-9_$]*)=\{((?:\d+:[0-9e.+\-]+,?)+)\}/g;
+        let om;
+        while ((om = objRe.exec(js)) !== null) {
+            const name = om[1];
+            const pairs = om[2];
             const obj = {};
-            for (const pair of m[1].split(',')) {
-                const [k, v] = pair.split(':');
-                if (k !== undefined && v !== undefined) {
-                    const nv = Number(v);
-                    obj[Number(k)] = isNaN(nv) ? 1 : nv; // 'mr' defaults resolve to 1
-                }
+            let count = 0;
+            for (const pair of pairs.split(',')) {
+                const ci = pair.indexOf(':');
+                if (ci < 0) continue;
+                const k = Number(pair.slice(0, ci));
+                const v = Number(pair.slice(ci + 1));
+                if (!isNaN(k) && !isNaN(v)) { obj[k] = v; count++; }
             }
-            return obj;
+            if (count >= 20) allObjs[name] = obj; // only objects with many market entries
         }
 
-        _riskConstants = {
-            beta: parseObj('kLe'),
-            vol: parseObj('xLe'),
-            drift: parseObj('wLe'),
-        };
-        console.log("[Perpetualpulse] Risk constants loaded:", Object.keys(_riskConstants.beta).length, "markets");
+        // Classify: beta ~0.1-3 centered near 1, vol ~0.001-0.2 all positive, drift ~(-0.05,0.05) mostly negative
+        function classify(obj) {
+            const vals = Object.values(obj).filter(v => isFinite(v));
+            if (!vals.length) return null;
+            const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+            const allPos = vals.every(v => v >= 0);
+            const maxV = Math.max(...vals), minV = Math.min(...vals);
+            if (allPos && mean > 0.5 && mean < 2.5 && maxV < 5) return 'beta';
+            if (allPos && mean < 0.15 && maxV < 0.25) return 'vol';
+            if (Math.abs(mean) < 0.03 && minV < -0.001) return 'drift';
+            return null;
+        }
+
+        const beta = {}, vol = {}, drift = {};
+        for (const [name, obj] of Object.entries(allObjs)) {
+            const type = classify(obj);
+            if (type === 'beta') Object.assign(beta, obj);
+            else if (type === 'vol') Object.assign(vol, obj);
+            else if (type === 'drift') Object.assign(drift, obj);
+        }
+
+        _riskConstants = { beta, vol, drift };
+        console.log("[Perpetualpulse] Risk constants loaded:", Object.keys(beta).length, "beta,", Object.keys(vol).length, "vol,", Object.keys(drift).length, "drift markets");
     } catch (e) {
         console.warn("[Perpetualpulse] Failed to fetch risk constants:", e);
     }
