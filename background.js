@@ -101,9 +101,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
 
             // Fetch deposits (requires l1_address) and withdrawals in parallel
+            // NOTE: withdraw response key is "withdraws" (not "withdrawals") per Lighter API spec
             const [depResult, wdResult] = await Promise.all([
                 fetchAllPages(`${BASE_URL}/deposit/history?account_index=${ACCOUNT_INDEX}&l1_address=${L1_ADDRESS}`, token, "deposits"),
-                fetchAllPages(`${BASE_URL}/withdraw/history?account_index=${ACCOUNT_INDEX}`, token, "withdrawals"),
+                fetchAllPages(`${BASE_URL}/withdraw/history?account_index=${ACCOUNT_INDEX}`, token, "withdraws"),
             ]);
 
             if (depResult.error && wdResult.error) {
@@ -111,10 +112,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
+            // Partial errors — report warning but still return what we have
+            const warnings = [];
+            if (depResult.error) warnings.push(`deposits HTTP ${depResult.error}`);
+            if (wdResult.error) warnings.push(`withdrawals HTTP ${wdResult.error}`);
+
             sendResponse({
                 ok: true,
                 deposits: depResult.items || [],
                 withdrawals: wdResult.items || [],
+                warning: warnings.length ? warnings.join("; ") : null,
             });
         } catch (e) {
             sendResponse({ ok: false, error: e.message });

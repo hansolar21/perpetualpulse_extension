@@ -1258,7 +1258,8 @@
 
     // --- Deposits & Withdrawals separate sync ---
     const ACCOUNT_INDEX = 24;
-    const ASSET_NAMES = { 1: "LIT", 2: "LIT_STAKE", 3: "USDC" }; // 3=USDC confirmed
+    // Asset IDs from GET /api/v1/assetDetails (verified 2026-04-08)
+    const ASSET_NAMES = { 1: "ETH", 2: "LIT", 3: "USDC", 5: "LINK", 6: "UNI", 7: "AAVE", 8: "SKY", 9: "LDO", 10: "AZTEC" };
     const USDC_ASSET_ID = 3;
     const assetName = (id) => ASSET_NAMES[id] || (id != null ? `asset_${id}` : "USDC");
 
@@ -1333,7 +1334,8 @@
 
             const parsed = parseDepWd(resp.deposits || [], resp.withdrawals || []);
             chrome.storage.local.set({ pp_transfers_json: JSON.stringify(parsed) }, () => {
-                statusEl.textContent = `✓ ${parsed.length} records (${resp.deposits?.length||0} dep, ${resp.withdrawals?.length||0} wd) — reloading...`;
+                const warnStr = resp.warning ? ` ⚠ ${resp.warning}` : "";
+                statusEl.textContent = `✓ ${parsed.length} records (${resp.deposits?.length||0} dep, ${resp.withdrawals?.length||0} wd)${warnStr} — reloading...`;
                 setTimeout(() => location.reload(), 1000);
             });
         });
