@@ -287,13 +287,20 @@
     async function renderExposure() {
         const trades = query(`SELECT date, market, side, trade_value, size, price FROM trades ORDER BY date ASC`);
 
-        // Try to get transfers for equity calculation (table may not exist yet)
-        _db.run(`CREATE TABLE IF NOT EXISTS transfers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL, type TEXT NOT NULL, amount REAL NOT NULL,
-            UNIQUE(date, type, amount)
-        )`);
-        const transfers = query(`SELECT date, type, amount FROM transfers ORDER BY date ASC`);
+        // Load transfers from separate storage key (avoids DB schema issues)
+        const _rawTransfers = await new Promise(r =>
+            chrome.storage.local.get("pp_transfers_json", d => r(d.pp_transfers_json ? JSON.parse(d.pp_transfers_json) : []))
+        );
+        // Also try DB table as fallback
+        let _dbTransfers = [];
+        try { _dbTransfers = query(`SELECT date, type, amount FROM transfers ORDER BY date ASC`); } catch(e) {}
+        // Merge, dedupe by date+type+amount
+        const _seen = new Set();
+        const transfers = [..._rawTransfers, ..._dbTransfers].filter(t => {
+            const k = `${t.date}|${t.type}|${t.amount}`;
+            if (_seen.has(k)) return false;
+            _seen.add(k); return true;
+        }).sort((a, b) => a.date < b.date ? -1 : 1);
         const hasTransfers = transfers.length > 0;
         // Load initial equity from settings (fallback when no transfers)
         const _settings = await new Promise(r => chrome.storage.local.get(["pp_settings"], d => r(d.pp_settings || {})));
@@ -476,11 +483,32 @@
     }
 
     // ---- Deposits & Withdrawals ----
-    function renderTransfers() {
-        const data = query(`SELECT DATE(date) as day, type, SUM(amount) as amount
-            FROM transfers GROUP BY day, type ORDER BY day`);
+    async function renderTransfers() {
+        // Load from separate storage key (source of truth after sync)
+        const stored = await new Promise(r =>
+            chrome.storage.local.get("pp_transfers_json", d => r(d.pp_transfers_json ? JSON.parse(d.pp_transfers_json) : null))
+        );
+        let rows;
+        if (stored && stored.length > 0) {
+            // Aggregate by day+type from stored JSON
+            const agg = {};
+            for (const t of stored) {
+                const day = t.date.slice(0, 10);
+                const key = `${day}|${t.type}`;
+                agg[key] = (agg[key] || { day, type: t.type, amount: 0 });
+                agg[key].amount += t.amount;
+            }
+            rows = Object.values(agg).sort((a, b) => a.day < b.day ? -1 : 1);
+        } else {
+            // Fallback to DB
+            let dbRows = [];
+            try { dbRows = query(`SELECT DATE(date) as day, type, SUM(amount) as amount FROM transfers GROUP BY day, type ORDER BY day`); } catch(e) {}
+            rows = dbRows;
+        }
+
+        const data = rows;
         if (data.length === 0) {
-            document.getElementById("chart-transfers").innerHTML = '<p style="color:#8892a4;text-align:center;padding:60px">No transfer data yet. Sync from Lighter to fetch.</p>';
+            document.getElementById("chart-transfers").innerHTML = '<p style="color:#8892a4;text-align:center;padding:60px">No transfer data. Add read-only token in ⚙ Settings then click ↻ Sync.</p>';
             return;
         }
 
@@ -1151,7 +1179,7 @@
             renderSummary();
             renderEquityCurve();
             await renderExposure();
-            renderTransfers();
+            await renderTransfers();
             renderDailyPnL();
             renderMarketPnL();
             renderMarketVolume();
@@ -1245,16 +1273,6 @@
         return out;
     }
 
-    function saveDBToStorage() {
-        if (!_db) return;
-        try {
-            const data = _db.export();
-            const binary = Array.from(data).map(b => String.fromCharCode(b)).join("");
-            const b64 = btoa(binary);
-            chrome.storage.local.set({ pp_trade_db_b64: b64 });
-        } catch (e) { console.warn("Dashboard DB save failed:", e); }
-    }
-
     document.getElementById("btn-sync-transfers").addEventListener("click", () => {
         const statusEl = document.getElementById("transfer-sync-status");
         const btn = document.getElementById("btn-sync-transfers");
@@ -1263,44 +1281,15 @@
 
         chrome.runtime.sendMessage({ type: "pp-sync-deposits" }, (resp) => {
             btn.disabled = false;
-            if (chrome.runtime.lastError || !resp) {
-                statusEl.textContent = "Error — check console";
-                return;
-            }
-            if (!resp.ok) {
-                statusEl.textContent = `✗ ${resp.error}`;
-                if (resp.error && resp.error.includes("No read-only")) {
-                    statusEl.textContent += " — click ⚙ Settings";
-                }
-                return;
-            }
+            if (chrome.runtime.lastError || !resp) { statusEl.textContent = "Error — check console"; return; }
+            if (!resp.ok) { statusEl.textContent = `✗ ${resp.error}`; return; }
 
-            // Ensure transfers table exists then insert
-            _db.run(`CREATE TABLE IF NOT EXISTS transfers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL,
-                type TEXT NOT NULL,
-                amount REAL NOT NULL,
-                UNIQUE(date, type, amount)
-            )`);
-
+            // Store as separate small JSON — avoids re-exporting the huge DB blob
             const transfers = parseTransfers(resp.transfers || []);
-            let added = 0;
-            for (const t of transfers) {
-                try {
-                    _db.run(
-                        `INSERT OR IGNORE INTO transfers (date, type, amount) VALUES (?, ?, ?)`,
-                        [t.date, t.type, t.amount]
-                    );
-                    added++;
-                } catch (e) { /* duplicate */ }
-            }
-            if (added > 0) saveDBToStorage();
-
-            statusEl.textContent = added > 0
-                ? `✓ +${added} transfers — reloading...`
-                : `✓ Fetched ${resp.total} (0 new) — reloading...`;
-            setTimeout(() => location.reload(), 1200);
+            chrome.storage.local.set({ pp_transfers_json: JSON.stringify(transfers) }, () => {
+                statusEl.textContent = `✓ ${transfers.length} transfers — reloading...`;
+                setTimeout(() => location.reload(), 1000);
+            });
         });
     });
 
