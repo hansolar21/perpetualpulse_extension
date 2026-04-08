@@ -287,7 +287,12 @@
     async function renderExposure() {
         const trades = query(`SELECT date, market, side, trade_value, size, price FROM trades ORDER BY date ASC`);
 
-        // Try to get transfers for equity calculation
+        // Try to get transfers for equity calculation (table may not exist yet)
+        _db.run(`CREATE TABLE IF NOT EXISTS transfers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL, type TEXT NOT NULL, amount REAL NOT NULL,
+            UNIQUE(date, type, amount)
+        )`);
         const transfers = query(`SELECT date, type, amount FROM transfers ORDER BY date ASC`);
         const hasTransfers = transfers.length > 0;
         // Load initial equity from settings (fallback when no transfers)
@@ -1270,7 +1275,15 @@
                 return;
             }
 
-            // Parse and insert transfers directly into dashboard DB
+            // Ensure transfers table exists then insert
+            _db.run(`CREATE TABLE IF NOT EXISTS transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                UNIQUE(date, type, amount)
+            )`);
+
             const transfers = parseTransfers(resp.transfers || []);
             let added = 0;
             for (const t of transfers) {
