@@ -301,14 +301,21 @@
             if (_seen.has(k)) return false;
             _seen.add(k); return true;
         }).sort((a, b) => a.date < b.date ? -1 : 1);
-        // Only count USDC transfers for equity/leverage (asset_id=1, or unknown/legacy entries)
-        const usdcTransfers = transfers.filter(t => t.asset_id == null || t.asset_id === 1);
+        // Only USDC (asset_id=3) for equity/leverage; include entries without asset_id (legacy)
+        const usdcTransfers = transfers.filter(t => t.asset_id == null || t.asset_id === USDC_ASSET_ID);
         const hasTransfers = usdcTransfers.length > 0;
         // Load initial equity from settings (fallback when no transfers)
         const _settings = await new Promise(r => chrome.storage.local.get(["pp_settings"], d => r(d.pp_settings || {})));
         const initialEquity = parseFloat(_settings.initial_equity) || 0;
 
-        chrome.storage.local.remove("pp_transfer_debug");
+        const _dbg2 = await new Promise(r => chrome.storage.local.get(["pp_transfer_debug"], d => r(d.pp_transfer_debug || null)));
+        if (_dbg2) {
+            const el = document.getElementById("chart-transfers");
+            const pre = document.createElement("pre");
+            pre.style.cssText = "background:#0d1117;color:#ffab00;font-size:10px;padding:10px;border-radius:2px;overflow:auto;max-height:180px;margin-bottom:10px;white-space:pre-wrap;word-break:break-all";
+            pre.textContent = "RAW SAMPLE (dep/wd):\n" + JSON.stringify(JSON.parse(_dbg2), null, 2);
+            el.parentElement.insertBefore(pre, el);
+        }
 
         const positions = {};
         const dailySnaps = {};
@@ -1251,8 +1258,9 @@
 
     // --- Deposits & Withdrawals separate sync ---
     const ACCOUNT_INDEX = 24;
-    const ASSET_NAMES = { 1: "USDC", 2: "LIT", 3: "ETH" };
-    const assetName = (id) => ASSET_NAMES[id] || (id != null ? `asset_${id}` : "?");
+    const ASSET_NAMES = { 1: "LIT", 2: "LIT_STAKE", 3: "USDC" }; // 3=USDC confirmed
+    const USDC_ASSET_ID = 3;
+    const assetName = (id) => ASSET_NAMES[id] || (id != null ? `asset_${id}` : "USDC");
 
     function parseTransfers(raw) {
         const out = [];
@@ -1283,6 +1291,28 @@
         return out;
     }
 
+    function parseDepWd(deposits, withdrawals) {
+        const out = [];
+        for (const d of deposits) {
+            // Try common field names — will refine after seeing raw data
+            const ts = d.timestamp || d.created_at || d.block_time || d.time;
+            const date = ts ? new Date(typeof ts === "number" ? (ts > 1e12 ? ts : ts * 1000) : ts).toISOString() : "";
+            if (!date) continue;
+            const amount = parseFloat(d.amount || d.collateral || d.value || 0);
+            if (!amount) continue;
+            out.push({ date, type: "Deposit", amount: +amount, asset_id: d.asset_id ?? USDC_ASSET_ID, asset: assetName(d.asset_id ?? USDC_ASSET_ID) });
+        }
+        for (const w of withdrawals) {
+            const ts = w.timestamp || w.created_at || w.block_time || w.time;
+            const date = ts ? new Date(typeof ts === "number" ? (ts > 1e12 ? ts : ts * 1000) : ts).toISOString() : "";
+            if (!date) continue;
+            const amount = parseFloat(w.amount || w.collateral || w.value || 0);
+            if (!amount) continue;
+            out.push({ date, type: "Withdrawal", amount: -Math.abs(amount), asset_id: w.asset_id ?? USDC_ASSET_ID, asset: assetName(w.asset_id ?? USDC_ASSET_ID) });
+        }
+        return out.sort((a, b) => a.date < b.date ? -1 : 1);
+    }
+
     document.getElementById("btn-sync-transfers").addEventListener("click", () => {
         const statusEl = document.getElementById("transfer-sync-status");
         const btn = document.getElementById("btn-sync-transfers");
@@ -1294,10 +1324,16 @@
             if (chrome.runtime.lastError || !resp) { statusEl.textContent = "Error — check console"; return; }
             if (!resp.ok) { statusEl.textContent = `✗ ${resp.error}`; return; }
 
-            // Store as separate small JSON — avoids re-exporting the huge DB blob
-            const transfers = parseTransfers(resp.transfers || []);
-            chrome.storage.local.set({ pp_transfers_json: JSON.stringify(transfers) }, () => {
-                statusEl.textContent = `✓ ${transfers.length} transfers — reloading...`;
+            // Debug: store raw samples to inspect field names
+            const rawSample = {
+                deposit: (resp.deposits || [])[0] || null,
+                withdrawal: (resp.withdrawals || [])[0] || null,
+            };
+            chrome.storage.local.set({ pp_transfer_debug: JSON.stringify(rawSample) });
+
+            const parsed = parseDepWd(resp.deposits || [], resp.withdrawals || []);
+            chrome.storage.local.set({ pp_transfers_json: JSON.stringify(parsed) }, () => {
+                statusEl.textContent = `✓ ${parsed.length} records (${resp.deposits?.length||0} dep, ${resp.withdrawals?.length||0} wd) — reloading...`;
                 setTimeout(() => location.reload(), 1000);
             });
         });

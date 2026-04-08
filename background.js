@@ -61,7 +61,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // keep channel open for async response
 });
 
-// --- Sync deposits/withdrawals directly using stored read-only token ---
+// --- Sync deposits/withdrawals from correct on-chain endpoints ---
+const L1_ADDRESS = "0x9b8D146AB4b61C281B993E3F85066249A6e9b0Db";
+const ACCOUNT_INDEX = 24;
+const BASE_URL = "https://mainnet.zklighter.elliot.ai/api/v1";
+
+async function fetchAllPages(url, token, itemKey) {
+    const all = [];
+    let cursor = null;
+    while (true) {
+        const fullUrl = cursor ? `${url}&cursor=${encodeURIComponent(cursor)}` : url;
+        const resp = await fetch(fullUrl, { headers: { authorization: token, PreferAuthServer: "true" } });
+        if (!resp.ok) return { error: resp.status, items: all };
+        const data = await resp.json();
+        // Debug: log keys on first page
+        if (!cursor) console.log(`[PP BG] ${url.split("?")[0].split("/").pop()} keys:`, Object.keys(data), "first item:", JSON.stringify((data[itemKey]||[])[0] || data).slice(0,200));
+        const items = data[itemKey] || data.items || data.data || [];
+        if (!items.length) break;
+        all.push(...items);
+        cursor = data.cursor || data.next_cursor || data.nextCursor || null;
+        if (!cursor) break;
+        await new Promise(r => setTimeout(r, 200));
+    }
+    return { items: all };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type !== "pp-sync-deposits") return false;
 
@@ -71,43 +95,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 chrome.storage.local.get(["pp_settings"], d => r(d.pp_settings || {}))
             );
             const token = settings.auth_token || null;
-            const accountIndex = 24;
-
             if (!token) {
                 sendResponse({ ok: false, error: "No read-only API token saved. Add it in ⚙ Settings." });
                 return;
             }
 
-            const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer/history";
-            const all = [];
-            let cursor = undefined;
+            // Fetch deposits (requires l1_address) and withdrawals in parallel
+            const [depResult, wdResult] = await Promise.all([
+                fetchAllPages(`${BASE_URL}/deposit/history?account_index=${ACCOUNT_INDEX}&l1_address=${L1_ADDRESS}`, token, "deposits"),
+                fetchAllPages(`${BASE_URL}/withdraw/history?account_index=${ACCOUNT_INDEX}`, token, "withdrawals"),
+            ]);
 
-            while (true) {
-                let url = `${BASE}?account_index=${accountIndex}&limit=1000`;
-                if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-
-                const resp = await fetch(url, {
-                    headers: { authorization: token, PreferAuthServer: "true" },
-                });
-
-                if (!resp.ok) {
-                    sendResponse({ ok: false, error: `HTTP ${resp.status} — token may be expired or invalid` });
-                    return;
-                }
-
-                const data = await resp.json();
-                // Log first page response keys to debug pagination
-                if (!cursor) console.log("[PP BG] Transfer resp keys:", Object.keys(data), "count:", (data.transfers||[]).length);
-
-                const items = data.transfers || data.items || data.history || data.data || [];
-                if (items.length === 0) break;
-                all.push(...items);
-                cursor = data.cursor || data.next_cursor || data.nextCursor || data.pagination?.cursor || null;
-                if (!cursor) break;
-                await new Promise(r => setTimeout(r, 200));
+            if (depResult.error && wdResult.error) {
+                sendResponse({ ok: false, error: `HTTP ${depResult.error} — token may be expired or invalid` });
+                return;
             }
 
-            sendResponse({ ok: true, transfers: all, total: all.length });
+            sendResponse({
+                ok: true,
+                deposits: depResult.items || [],
+                withdrawals: wdResult.items || [],
+            });
         } catch (e) {
             sendResponse({ ok: false, error: e.message });
         }
