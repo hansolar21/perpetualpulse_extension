@@ -294,15 +294,7 @@
         const _settings = await new Promise(r => chrome.storage.local.get(["pp_settings"], d => r(d.pp_settings || {})));
         const initialEquity = parseFloat(_settings.initial_equity) || 0;
 
-        // Show transfer debug sample if present
-        const _dbg = await new Promise(r => chrome.storage.local.get(["pp_transfer_debug"], d => r(d.pp_transfer_debug || null)));
-        if (_dbg) {
-            const el = document.getElementById("chart-transfers");
-            const pre = document.createElement("pre");
-            pre.style.cssText = "background:#0d1117;color:#ffab00;font-size:10px;padding:10px;border-radius:2px;overflow:auto;max-height:160px;margin-bottom:10px;white-space:pre-wrap";
-            pre.textContent = "RAW TRANSFER SAMPLE:\n" + _dbg;
-            el.parentElement.insertBefore(pre, el);
-        }
+        chrome.storage.local.remove("pp_transfer_debug");
 
         const positions = {};
         const dailySnaps = {};
@@ -1208,25 +1200,42 @@
     });
 
     // --- Deposits & Withdrawals separate sync ---
+    const ACCOUNT_INDEX = 24;
     function parseTransfers(raw) {
         const out = [];
         for (const t of raw) {
-            const ts = t.timestamp || t.created_at || t.date || "";
-            const date = ts ? new Date(typeof ts === "number" ? ts * 1000 : ts).toISOString() : "";
-            const typeLower = (t.type || "").toLowerCase();
-            let type = "Unknown", amount = 0;
-            if (t.l1_tx_hash || typeLower.includes("deposit") || typeLower === "collateral_in") {
-                type = "Deposit"; amount = Math.abs(parseFloat(t.amount || t.collateral || t.value || 0));
-            } else if (typeLower.includes("withdraw") || typeLower === "collateral_out") {
-                type = "Withdrawal"; amount = -Math.abs(parseFloat(t.amount || t.collateral || t.value || 0));
-            } else if (typeLower.includes("transfer_in") || typeLower.includes("inflow")) {
-                type = "TransferIn"; amount = Math.abs(parseFloat(t.amount || t.collateral || 0));
-            } else if (typeLower.includes("transfer_out") || typeLower.includes("outflow")) {
-                type = "TransferOut"; amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
-            } else {
-                amount = parseFloat(t.amount || t.collateral || t.value || 0);
+            // timestamp is in milliseconds
+            const date = t.timestamp ? new Date(t.timestamp).toISOString() : "";
+            if (!date) continue;
+
+            // Only track USDC (asset_id=2) for equity purposes; skip non-USDC for now
+            if (t.asset_id !== 2) continue;
+
+            const amount = parseFloat(t.amount || 0);
+            if (!amount) continue;
+
+            let type, signedAmount;
+            switch (t.type) {
+                case "L2TransferInflow":
+                    // Money arriving at our account from external
+                    type = "Deposit";
+                    signedAmount = +amount;
+                    break;
+                case "L2TransferOutflow":
+                    // Money leaving our account to external
+                    type = "Withdrawal";
+                    signedAmount = -amount;
+                    break;
+                case "L2SelfTransfer":
+                    // Internal perps↔spot move — skip (doesn't affect total equity)
+                    continue;
+                default:
+                    type = t.type;
+                    // Infer direction from account index
+                    signedAmount = t.to_account_index === ACCOUNT_INDEX ? +amount : -amount;
             }
-            if (date && amount !== 0) out.push({ date, type, amount });
+
+            out.push({ date, type, amount: signedAmount });
         }
         return out;
     }
@@ -1274,11 +1283,6 @@
                 } catch (e) { /* duplicate */ }
             }
             if (added > 0) saveDBToStorage();
-
-            // Store raw sample for debugging (survives reload)
-            if (resp.transfers && resp.transfers.length > 0) {
-                chrome.storage.local.set({ pp_transfer_debug: JSON.stringify(resp.transfers.slice(0, 3)) });
-            }
 
             statusEl.textContent = added > 0
                 ? `✓ +${added} transfers — reloading...`

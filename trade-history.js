@@ -395,29 +395,24 @@
 
                     const transfers = [];
                     for (const t of raw) {
-                        let type = t.type || "Unknown";
-                        let amount = 0;
-                        const ts = t.timestamp || t.created_at || t.date || "";
-                        const date = ts ? new Date(typeof ts === "number" ? ts * 1000 : ts).toISOString() : "";
+                        // timestamp is milliseconds; asset_id=2 is USDC
+                        if (t.asset_id !== undefined && t.asset_id !== 2) continue;
+                        const date = t.timestamp ? new Date(t.timestamp).toISOString()
+                            : t.created_at ? new Date(t.created_at).toISOString() : "";
+                        if (!date) continue;
+                        const amount = parseFloat(t.amount || t.collateral || 0);
+                        if (!amount) continue;
 
-                        const typeLower = type.toLowerCase();
-                        if (t.l1_tx_hash || typeLower.includes("deposit")) {
-                            type = "Deposit";
-                            amount = parseFloat(t.amount || t.collateral || 0);
-                        } else if (typeLower.includes("withdraw")) {
-                            type = "Withdrawal";
-                            amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
-                        } else if (typeLower.includes("inflow") || typeLower.includes("transfer_in")) {
-                            type = "TransferIn";
-                            amount = parseFloat(t.amount || t.collateral || 0);
-                        } else if (typeLower.includes("outflow") || typeLower.includes("transfer_out")) {
-                            type = "TransferOut";
-                            amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
-                        } else {
-                            amount = parseFloat(t.amount || t.collateral || t.value || 0);
+                        let type, signedAmount;
+                        switch (t.type) {
+                            case "L2TransferInflow":  type = "Deposit";    signedAmount = +amount; break;
+                            case "L2TransferOutflow": type = "Withdrawal"; signedAmount = -amount; break;
+                            case "L2SelfTransfer": continue; // internal perps↔spot, skip
+                            default:
+                                type = t.type || "Unknown";
+                                signedAmount = t.to_account_index === accountIndex ? +amount : -amount;
                         }
-
-                        if (date && amount !== 0) transfers.push({ date, type, amount });
+                        if (date && signedAmount) transfers.push({ date, type, amount: signedAmount });
                     }
                     resolve(transfers);
                 }
