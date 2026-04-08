@@ -1200,15 +1200,25 @@
     // --- Deposits & Withdrawals separate sync ---
     document.getElementById("btn-sync-transfers").addEventListener("click", () => {
         const statusEl = document.getElementById("transfer-sync-status");
-        statusEl.textContent = "Opening Lighter...";
-        chrome.tabs.create({ url: "https://app.lighter.xyz/portfolio", active: false }, (tab) => {
-            statusEl.textContent = "Syncing transfers...";
-            // Give the page time to load WASM and run sync, then close
-            setTimeout(() => {
-                chrome.tabs.remove(tab.id);
-                statusEl.textContent = "Done — reloading...";
-                setTimeout(() => location.reload(), 1000);
-            }, 35000);
+        const btn = document.getElementById("btn-sync-transfers");
+        btn.disabled = true;
+        statusEl.textContent = "Opening Lighter... (~35s)";
+
+        chrome.runtime.sendMessage({ type: "pp-sync-deposits" }, (resp) => {
+            if (chrome.runtime.lastError || !resp) {
+                statusEl.textContent = "Error — check console";
+                btn.disabled = false;
+                return;
+            }
+            if (resp.ok) {
+                statusEl.textContent = resp.added > 0
+                    ? `✓ +${resp.added} new — reloading...`
+                    : "✓ Done (0 new) — reloading...";
+                setTimeout(() => location.reload(), 1200);
+            } else {
+                statusEl.textContent = `Failed: ${resp.error || "403"}`;
+                btn.disabled = false;
+            }
         });
     });
 

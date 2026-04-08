@@ -849,6 +849,34 @@
         }
     });
 
+    // ---------- Force Transfer Sync (from background message) ----------
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+        if (msg.type !== "pp-force-sync-transfers") return false;
+        (async () => {
+            try {
+                await initSQL();
+                const auth = await getAuth();
+                const accountIndex = auth.accountIndex || msg.accountIndex || 24;
+                const freshToken = await generateFreshAuth(accountIndex) || auth.token;
+                console.log("[Perpetualpulse] Force transfer sync, token:", freshToken ? "ok" : "none");
+                const transfers = await fetchTransferHistory(freshToken, accountIndex);
+                let added = 0;
+                if (transfers.length > 0) {
+                    added = insertTransferObjects(transfers);
+                    await persistDB();
+                    console.log(`[Perpetualpulse] Transfer sync: +${added} new (${transfers.length} fetched)`);
+                } else {
+                    console.log("[Perpetualpulse] Transfer sync: 0 fetched (403 or empty)");
+                }
+                sendResponse({ ok: true, added, total: transfers.length });
+            } catch (e) {
+                console.error("[Perpetualpulse] Transfer sync error:", e.message);
+                sendResponse({ ok: false, error: e.message });
+            }
+        })();
+        return true; // keep channel open for async response
+    });
+
     // ---------- Init ----------
     // Auto-sync on page load (with delay to not block rendering)
     setTimeout(async () => {

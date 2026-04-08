@@ -61,6 +61,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // keep channel open for async response
 });
 
+// --- Open Lighter tab, wait for WASM, trigger transfer-only sync ---
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type !== "pp-sync-deposits") return false;
+
+    (async () => {
+        try {
+            const tab = await new Promise(r =>
+                chrome.tabs.create({ url: "https://app.lighter.xyz/portfolio", active: false }, r)
+            );
+
+            // Wait for tab to fully load
+            await new Promise(r => {
+                chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+                    if (tabId === tab.id && info.status === "complete") {
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        r();
+                    }
+                });
+            });
+
+            // Wait for WASM to initialize (app needs ~3-5s after page load)
+            await new Promise(r => setTimeout(r, 5000));
+
+            // Send force-sync message to content script
+            const result = await new Promise(r =>
+                chrome.tabs.sendMessage(tab.id, { type: "pp-force-sync-transfers", accountIndex: 24 }, (resp) => {
+                    if (chrome.runtime.lastError) r({ ok: false, error: chrome.runtime.lastError.message });
+                    else r(resp || { ok: false, error: "no response" });
+                })
+            );
+
+            chrome.tabs.remove(tab.id).catch(() => {});
+            sendResponse(result);
+        } catch (e) {
+            sendResponse({ ok: false, error: e.message });
+        }
+    })();
+    return true;
+});
+
 chrome.action.onClicked.addListener(() => {
     const url = chrome.runtime.getURL("dashboard.html");
     // Reuse existing dashboard tab if open
