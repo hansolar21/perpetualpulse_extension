@@ -294,6 +294,16 @@
         const _settings = await new Promise(r => chrome.storage.local.get(["pp_settings"], d => r(d.pp_settings || {})));
         const initialEquity = parseFloat(_settings.initial_equity) || 0;
 
+        // Show transfer debug sample if present
+        const _dbg = await new Promise(r => chrome.storage.local.get(["pp_transfer_debug"], d => r(d.pp_transfer_debug || null)));
+        if (_dbg) {
+            const el = document.getElementById("chart-transfers");
+            const pre = document.createElement("pre");
+            pre.style.cssText = "background:#0d1117;color:#ffab00;font-size:10px;padding:10px;border-radius:2px;overflow:auto;max-height:160px;margin-bottom:10px;white-space:pre-wrap";
+            pre.textContent = "RAW TRANSFER SAMPLE:\n" + _dbg;
+            el.parentElement.insertBefore(pre, el);
+        }
+
         const positions = {};
         const dailySnaps = {};
         let currentDay = null;
@@ -1265,9 +1275,9 @@
             }
             if (added > 0) saveDBToStorage();
 
-            // Log first item for debugging
+            // Store raw sample for debugging (survives reload)
             if (resp.transfers && resp.transfers.length > 0) {
-                console.log("[PP] Raw transfer sample:", JSON.stringify(resp.transfers[0]));
+                chrome.storage.local.set({ pp_transfer_debug: JSON.stringify(resp.transfers.slice(0, 3)) });
             }
 
             statusEl.textContent = added > 0
