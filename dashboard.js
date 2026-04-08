@@ -543,7 +543,7 @@
             series: [
                 { name: "Deposits", type: "bar", data: deposits, itemStyle: { color: C.green }, barMaxWidth: 12, stack: "tf" },
                 { name: "Withdrawals", type: "bar", data: withdrawals, itemStyle: { color: C.red }, barMaxWidth: 12, stack: "tf" },
-                { name: "Net Deposited", type: "line", data: cumBalance, smooth: 0.3, symbol: "none",
+                { name: "Net Deposited", type: "line", data: cumBalance, smooth: false, symbol: "none",
                     lineStyle: { color: C.purple, width: 2 }, yAxisIndex: 1 },
             ],
         });

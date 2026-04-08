@@ -83,7 +83,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             let cursor = undefined;
 
             while (true) {
-                let url = `${BASE}?account_index=${accountIndex}`;
+                let url = `${BASE}?account_index=${accountIndex}&limit=1000`;
                 if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
                 const resp = await fetch(url, {
@@ -96,10 +96,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 }
 
                 const data = await resp.json();
+                // Log first page response keys to debug pagination
+                if (!cursor) console.log("[PP BG] Transfer resp keys:", Object.keys(data), "count:", (data.transfers||[]).length);
+
                 const items = data.transfers || data.items || data.history || data.data || [];
                 if (items.length === 0) break;
                 all.push(...items);
-                cursor = data.cursor || data.next_cursor || null;
+                cursor = data.cursor || data.next_cursor || data.nextCursor || data.pagination?.cursor || null;
                 if (!cursor) break;
                 await new Promise(r => setTimeout(r, 200));
             }
