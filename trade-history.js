@@ -395,24 +395,26 @@
 
                     const transfers = [];
                     for (const t of raw) {
-                        // timestamp is milliseconds; asset_id=2 is USDC
-                        if (t.asset_id !== undefined && t.asset_id !== 2) continue;
                         const date = t.timestamp ? new Date(t.timestamp).toISOString()
                             : t.created_at ? new Date(t.created_at).toISOString() : "";
                         if (!date) continue;
                         const amount = parseFloat(t.amount || t.collateral || 0);
                         if (!amount) continue;
+                        if (t.type === "L2SelfTransfer" && t.from_account_index === t.to_account_index) continue;
 
                         let type, signedAmount;
                         switch (t.type) {
-                            case "L2TransferInflow":  type = "Deposit";    signedAmount = +amount; break;
-                            case "L2TransferOutflow": type = "Withdrawal"; signedAmount = -amount; break;
-                            case "L2SelfTransfer": continue; // internal perps↔spot, skip
+                            case "L2TransferInflow":    type = "Deposit";       signedAmount = +amount; break;
+                            case "L2TransferOutflow":   type = "Withdrawal";    signedAmount = -amount; break;
+                            case "L2StakeAssetInflow":  type = "StakeIn";       signedAmount = +amount; break;
+                            case "L2StakeAssetOutflow": type = "StakeOut";      signedAmount = -amount; break;
+                            case "L2FundingRebate":
+                            case "FundingRebate":       type = "FundingRebate"; signedAmount = +amount; break;
                             default:
                                 type = t.type || "Unknown";
                                 signedAmount = t.to_account_index === accountIndex ? +amount : -amount;
                         }
-                        if (date && signedAmount) transfers.push({ date, type, amount: signedAmount });
+                        if (signedAmount) transfers.push({ date, type, amount: signedAmount, asset_id: t.asset_id ?? null });
                     }
                     resolve(transfers);
                 }

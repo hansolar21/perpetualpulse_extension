@@ -301,7 +301,9 @@
             if (_seen.has(k)) return false;
             _seen.add(k); return true;
         }).sort((a, b) => a.date < b.date ? -1 : 1);
-        const hasTransfers = transfers.length > 0;
+        // Only count USDC transfers for equity/leverage (asset_id=1, or unknown/legacy entries)
+        const usdcTransfers = transfers.filter(t => t.asset_id == null || t.asset_id === 1);
+        const hasTransfers = usdcTransfers.length > 0;
         // Load initial equity from settings (fallback when no transfers)
         const _settings = await new Promise(r => chrome.storage.local.get(["pp_settings"], d => r(d.pp_settings || {})));
         const initialEquity = parseFloat(_settings.initial_equity) || 0;
@@ -316,7 +318,7 @@
         let equity = 0;
         const dailyEquity = {};
         const transfersByDay = {};
-        for (const t of transfers) {
+        for (const t of usdcTransfers) {
             const day = (t.date || "").slice(0, 10);
             if (!transfersByDay[day]) transfersByDay[day] = 0;
             transfersByDay[day] += t.amount;
@@ -494,8 +496,8 @@
             const agg = {};
             for (const t of stored) {
                 const day = t.date.slice(0, 10);
-                const key = `${day}|${t.type}`;
-                agg[key] = (agg[key] || { day, type: t.type, amount: 0 });
+                const key = `${day}|${t.type}|${t.asset || ""}`;
+                agg[key] = (agg[key] || { day, type: t.type, amount: 0, asset: t.asset || "" });
                 agg[key].amount += t.amount;
             }
             rows = Object.values(agg).sort((a, b) => a.day < b.day ? -1 : 1);
@@ -512,25 +514,40 @@
             return;
         }
 
-        // Running balance
+        // Running balance — only USDC for cumulative net deposited line
         let balance = 0;
         const dayMap = {};
         for (const r of data) {
-            if (!dayMap[r.day]) dayMap[r.day] = { deposits: 0, withdrawals: 0 };
+            if (!dayMap[r.day]) dayMap[r.day] = { deposits: 0, withdrawals: 0, items: [] };
             if (r.amount > 0) dayMap[r.day].deposits += r.amount;
             else dayMap[r.day].withdrawals += r.amount;
+            dayMap[r.day].items.push(r);
         }
         const days = Object.keys(dayMap).sort();
         const deposits = [], withdrawals = [], cumBalance = [];
         for (const d of days) {
             deposits.push(Math.round(dayMap[d].deposits * 100) / 100);
             withdrawals.push(Math.round(dayMap[d].withdrawals * 100) / 100);
-            balance += dayMap[d].deposits + dayMap[d].withdrawals;
+            // Only USDC moves affect cumulative balance
+            const usdcNet = dayMap[d].items
+                .filter(r => !r.asset || r.asset === "USDC")
+                .reduce((s, r) => s + r.amount, 0);
+            balance += usdcNet;
             cumBalance.push(Math.round(balance * 100) / 100);
         }
 
         makeChart("chart-transfers").setOption({
-            tooltip: { ...tooltipBase(), formatter: fmtTooltip },
+            tooltip: { ...tooltipBase(), trigger: "axis", formatter: (params) => {
+                const d = params[0]?.axisValue;
+                const m = dayMap[d];
+                if (!m) return d;
+                let s = `<b>${d}</b>`;
+                for (const item of m.items) {
+                    const color = item.amount >= 0 ? C.green : C.red;
+                    s += `<br/><span style="color:${color}">${item.amount >= 0 ? "+" : ""}${item.amount.toFixed(2)} ${item.asset || ""}</span> <span style="color:${C.dim}">${item.type}</span>`;
+                }
+                return s;
+            }},
             legend: { data: ["Deposits", "Withdrawals", "Net Deposited"], textStyle: { color: C.dim }, top: 5, icon: "roundRect", itemWidth: 14, itemHeight: 3 },
             grid: baseGrid({ top: 40, right: 70 }),
             xAxis: { type: "category", data: days, axisLabel: { color: C.dim, fontSize: 10 }, axisLine: { lineStyle: { color: C.border } } },
@@ -1234,41 +1251,34 @@
 
     // --- Deposits & Withdrawals separate sync ---
     const ACCOUNT_INDEX = 24;
+    const ASSET_NAMES = { 1: "USDC", 2: "LIT", 3: "ETH" };
+    const assetName = (id) => ASSET_NAMES[id] || (id != null ? `asset_${id}` : "?");
+
     function parseTransfers(raw) {
         const out = [];
         for (const t of raw) {
-            // timestamp is in milliseconds
             const date = t.timestamp ? new Date(t.timestamp).toISOString() : "";
             if (!date) continue;
-
-            // Only track USDC (asset_id=2) for equity purposes; skip non-USDC for now
-            if (t.asset_id !== 2) continue;
-
             const amount = parseFloat(t.amount || 0);
             if (!amount) continue;
 
+            // Skip internal same-account perps↔spot moves
+            if (t.type === "L2SelfTransfer" && t.from_account_index === t.to_account_index) continue;
+
             let type, signedAmount;
             switch (t.type) {
-                case "L2TransferInflow":
-                    // Money arriving at our account from external
-                    type = "Deposit";
-                    signedAmount = +amount;
-                    break;
-                case "L2TransferOutflow":
-                    // Money leaving our account to external
-                    type = "Withdrawal";
-                    signedAmount = -amount;
-                    break;
-                case "L2SelfTransfer":
-                    // Internal perps↔spot move — skip (doesn't affect total equity)
-                    continue;
+                case "L2TransferInflow":  type = "Deposit";       signedAmount = +amount; break;
+                case "L2TransferOutflow": type = "Withdrawal";    signedAmount = -amount; break;
+                case "L2StakeAssetInflow":  type = "StakeIn";     signedAmount = +amount; break;
+                case "L2StakeAssetOutflow": type = "StakeOut";    signedAmount = -amount; break;
+                case "L2FundingRebate":
+                case "FundingRebate":     type = "FundingRebate"; signedAmount = +amount; break;
                 default:
-                    type = t.type;
-                    // Infer direction from account index
+                    type = t.type || "Unknown";
                     signedAmount = t.to_account_index === ACCOUNT_INDEX ? +amount : -amount;
             }
 
-            out.push({ date, type, amount: signedAmount });
+            out.push({ date, type, amount: signedAmount, asset_id: t.asset_id ?? null, asset: assetName(t.asset_id) });
         }
         return out;
     }
