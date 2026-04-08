@@ -6,7 +6,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const { accountIndex, authToken } = msg;
 
     (async () => {
-        const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer_history";
+        const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer/history";
         const all = [];
         let cursor = undefined;
         let pages = 0;
@@ -61,39 +61,50 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // keep channel open for async response
 });
 
-// --- Open Lighter tab, wait for WASM, trigger transfer-only sync ---
+// --- Sync deposits/withdrawals directly using stored read-only token ---
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type !== "pp-sync-deposits") return false;
 
     (async () => {
         try {
-            const tab = await new Promise(r =>
-                chrome.tabs.create({ url: "https://app.lighter.xyz/portfolio", active: false }, r)
+            const settings = await new Promise(r =>
+                chrome.storage.local.get(["pp_settings"], d => r(d.pp_settings || {}))
             );
+            const token = settings.auth_token || null;
+            const accountIndex = 24;
 
-            // Wait for tab to fully load
-            await new Promise(r => {
-                chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-                    if (tabId === tab.id && info.status === "complete") {
-                        chrome.tabs.onUpdated.removeListener(listener);
-                        r();
-                    }
+            if (!token) {
+                sendResponse({ ok: false, error: "No read-only API token saved. Add it in ⚙ Settings." });
+                return;
+            }
+
+            const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer/history";
+            const all = [];
+            let cursor = undefined;
+
+            while (true) {
+                let url = `${BASE}?account_index=${accountIndex}`;
+                if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+
+                const resp = await fetch(url, {
+                    headers: { authorization: token, PreferAuthServer: "true" },
                 });
-            });
 
-            // Wait for WASM to initialize (app needs ~3-5s after page load)
-            await new Promise(r => setTimeout(r, 5000));
+                if (!resp.ok) {
+                    sendResponse({ ok: false, error: `HTTP ${resp.status} — token may be expired or invalid` });
+                    return;
+                }
 
-            // Send force-sync message to content script
-            const result = await new Promise(r =>
-                chrome.tabs.sendMessage(tab.id, { type: "pp-force-sync-transfers", accountIndex: 24 }, (resp) => {
-                    if (chrome.runtime.lastError) r({ ok: false, error: chrome.runtime.lastError.message });
-                    else r(resp || { ok: false, error: "no response" });
-                })
-            );
+                const data = await resp.json();
+                const items = data.transfers || data.items || data.history || data.data || [];
+                if (items.length === 0) break;
+                all.push(...items);
+                cursor = data.cursor || data.next_cursor || null;
+                if (!cursor) break;
+                await new Promise(r => setTimeout(r, 200));
+            }
 
-            chrome.tabs.remove(tab.id).catch(() => {});
-            sendResponse(result);
+            sendResponse({ ok: true, transfers: all, total: all.length });
         } catch (e) {
             sendResponse({ ok: false, error: e.message });
         }

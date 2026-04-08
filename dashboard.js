@@ -1198,27 +1198,82 @@
     });
 
     // --- Deposits & Withdrawals separate sync ---
+    function parseTransfers(raw) {
+        const out = [];
+        for (const t of raw) {
+            const ts = t.timestamp || t.created_at || t.date || "";
+            const date = ts ? new Date(typeof ts === "number" ? ts * 1000 : ts).toISOString() : "";
+            const typeLower = (t.type || "").toLowerCase();
+            let type = "Unknown", amount = 0;
+            if (t.l1_tx_hash || typeLower.includes("deposit") || typeLower === "collateral_in") {
+                type = "Deposit"; amount = Math.abs(parseFloat(t.amount || t.collateral || t.value || 0));
+            } else if (typeLower.includes("withdraw") || typeLower === "collateral_out") {
+                type = "Withdrawal"; amount = -Math.abs(parseFloat(t.amount || t.collateral || t.value || 0));
+            } else if (typeLower.includes("transfer_in") || typeLower.includes("inflow")) {
+                type = "TransferIn"; amount = Math.abs(parseFloat(t.amount || t.collateral || 0));
+            } else if (typeLower.includes("transfer_out") || typeLower.includes("outflow")) {
+                type = "TransferOut"; amount = -Math.abs(parseFloat(t.amount || t.collateral || 0));
+            } else {
+                amount = parseFloat(t.amount || t.collateral || t.value || 0);
+            }
+            if (date && amount !== 0) out.push({ date, type, amount });
+        }
+        return out;
+    }
+
+    function saveDBToStorage() {
+        if (!_db) return;
+        try {
+            const data = _db.export();
+            const binary = Array.from(data).map(b => String.fromCharCode(b)).join("");
+            const b64 = btoa(binary);
+            chrome.storage.local.set({ pp_trade_db_b64: b64 });
+        } catch (e) { console.warn("Dashboard DB save failed:", e); }
+    }
+
     document.getElementById("btn-sync-transfers").addEventListener("click", () => {
         const statusEl = document.getElementById("transfer-sync-status");
         const btn = document.getElementById("btn-sync-transfers");
         btn.disabled = true;
-        statusEl.textContent = "Opening Lighter... (~35s)";
+        statusEl.textContent = "Fetching...";
 
         chrome.runtime.sendMessage({ type: "pp-sync-deposits" }, (resp) => {
+            btn.disabled = false;
             if (chrome.runtime.lastError || !resp) {
                 statusEl.textContent = "Error — check console";
-                btn.disabled = false;
                 return;
             }
-            if (resp.ok) {
-                statusEl.textContent = resp.added > 0
-                    ? `✓ +${resp.added} new — reloading...`
-                    : "✓ Done (0 new) — reloading...";
-                setTimeout(() => location.reload(), 1200);
-            } else {
-                statusEl.textContent = `Failed: ${resp.error || "403"}`;
-                btn.disabled = false;
+            if (!resp.ok) {
+                statusEl.textContent = `✗ ${resp.error}`;
+                if (resp.error && resp.error.includes("No read-only")) {
+                    statusEl.textContent += " — click ⚙ Settings";
+                }
+                return;
             }
+
+            // Parse and insert transfers directly into dashboard DB
+            const transfers = parseTransfers(resp.transfers || []);
+            let added = 0;
+            for (const t of transfers) {
+                try {
+                    _db.run(
+                        `INSERT OR IGNORE INTO transfers (date, type, amount) VALUES (?, ?, ?)`,
+                        [t.date, t.type, t.amount]
+                    );
+                    added++;
+                } catch (e) { /* duplicate */ }
+            }
+            if (added > 0) saveDBToStorage();
+
+            // Log first item for debugging
+            if (resp.transfers && resp.transfers.length > 0) {
+                console.log("[PP] Raw transfer sample:", JSON.stringify(resp.transfers[0]));
+            }
+
+            statusEl.textContent = added > 0
+                ? `✓ +${added} transfers — reloading...`
+                : `✓ Fetched ${resp.total} (0 new) — reloading...`;
+            setTimeout(() => location.reload(), 1200);
         });
     });
 
