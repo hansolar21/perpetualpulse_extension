@@ -696,17 +696,19 @@ async function injectMetrics() {
 
     // Find column indices from headers
     const ths = table.querySelectorAll("thead th");
-    let markPriceIdx = -1, liqPriceIdx = -1;
+    let markPriceIdx = -1, liqPriceIdx = -1, pnlIdx = -1;
     ths.forEach((th, i) => {
         const text = (th.textContent || "").trim().toLowerCase();
         if (text.includes("mark")) markPriceIdx = i;
         if (text.includes("liq")) liqPriceIdx = i;
+        if (text.includes("pnl") || text.includes("p&l") || text.includes("unrealized")) pnlIdx = i;
     });
 
     let longSum = 0,
         shortSum = 0;
     let longCount = 0,
         shortCount = 0;
+    let unrealizedSum = 0;
     const riskPositions = []; // for risk metric computation
 
     const rows = table.querySelectorAll("tbody tr[data-testid^='row-']");
@@ -728,11 +730,12 @@ async function injectMetrics() {
             shortCount++;
         }
 
-        // Collect data for risk metrics
+        // Collect data for risk metrics + unrealized PnL
         if (isLong || isShort) {
             const symbol = getSymbolFromMarketCell(td0);
             const markPrice = markPriceIdx >= 0 && tds[markPriceIdx] ? parseUSD(tds[markPriceIdx].innerText) : 0;
             const liqPrice = liqPriceIdx >= 0 && tds[liqPriceIdx] ? parseUSD(tds[liqPriceIdx].innerText) : 0;
+            if (pnlIdx >= 0 && tds[pnlIdx]) unrealizedSum += parseUSD(tds[pnlIdx].innerText) || 0;
             riskPositions.push({
                 symbol,
                 sign: isLong ? 1 : -1,
@@ -741,6 +744,12 @@ async function injectMetrics() {
                 liqPrice,
             });
         }
+    });
+
+    // Store unrealized PnL to chrome.storage for the dashboard
+    chrome.storage.local.get("pp_unrealized_pnl", (existing) => {
+        const prev = existing.pp_unrealized_pnl || {};
+        chrome.storage.local.set({ pp_unrealized_pnl: { ...prev, lighter: unrealizedSum, ts: Date.now() } });
     });
 
     const portVal = safePortfolioValue();

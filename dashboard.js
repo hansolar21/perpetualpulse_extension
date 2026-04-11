@@ -143,6 +143,20 @@
         set("stat-volume", fmt(t.volume));
         set("stat-winrate", winRate);
 
+        // Unrealized P&L — read live from storage (written by content scripts)
+        chrome.storage.local.get("pp_unrealized_pnl", (res) => {
+            const u = res.pp_unrealized_pnl || {};
+            // Use lighter if available, fall back to hl, or show stale warning if >5min old
+            const unreal = u.lighter !== undefined ? u.lighter : (u.hl !== undefined ? u.hl : null);
+            const stale = u.ts && (Date.now() - u.ts) > 5 * 60 * 1000;
+            if (unreal !== null) {
+                const el = document.getElementById("stat-unrealized");
+                el.textContent = fmt(unreal) + (stale ? " ⚠" : "");
+                el.className = "card-value " + pnlClass(unreal);
+                el.title = stale ? "Data may be stale — open Lighter/HL tab to refresh" : `lighter: ${u.lighter !== undefined ? fmt(u.lighter) : "—"} | hl: ${u.hl !== undefined ? fmt(u.hl) : "—"}`;
+            }
+        });
+
         const range = query("SELECT MIN(date) as mn, MAX(date) as mx, COUNT(DISTINCT DATE(date)) as days FROM trades")[0] || {};
         document.getElementById("status-text").textContent =
             `${(t.trades || 0).toLocaleString()} trades | ${range.days || 0} days | ${(range.mn || "").slice(0, 10)} → ${(range.mx || "").slice(0, 10)} | funding: ${fmt(funding)}`;

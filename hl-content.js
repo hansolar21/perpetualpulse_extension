@@ -360,6 +360,17 @@
 
             // Parse positions for long/short metrics
             let longSum = 0, shortSum = 0, longCount = 0, shortCount = 0;
+            let unrealizedSum = 0;
+
+            // Detect PnL column index from header row
+            let hlPnlIdx = -1;
+            const headerRow = table.querySelector("tr");
+            if (headerRow) {
+                headerRow.querySelectorAll("th, td").forEach((th, i) => {
+                    const text = (th.textContent || "").trim().toLowerCase();
+                    if (text.includes("pnl") || text.includes("p&l") || text.includes("unrealized")) hlPnlIdx = i;
+                });
+            }
 
             // HL data rows: skip header row
             const allRows = table.querySelectorAll("tr");
@@ -382,6 +393,16 @@
 
                 if (isLong) { longSum += posValue; longCount++; }
                 else if (isShort) { shortSum += posValue; shortCount++; }
+
+                if ((isLong || isShort) && hlPnlIdx >= 0 && tds[hlPnlIdx]) {
+                    unrealizedSum += parseUSD(tds[hlPnlIdx].textContent) || 0;
+                }
+            });
+
+            // Store unrealized PnL to chrome.storage for the dashboard
+            chrome.storage.local.get("pp_unrealized_pnl", (existing) => {
+                const prev = existing.pp_unrealized_pnl || {};
+                chrome.storage.local.set({ pp_unrealized_pnl: { ...prev, hl: unrealizedSum, ts: Date.now() } });
             });
 
             // Find the account container to inject metrics
