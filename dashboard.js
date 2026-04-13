@@ -252,7 +252,7 @@
 
     async function computeHistoricalUnrealized(onProgress) {
         // 1. Load all trades ordered by time
-        const trades = query(`SELECT market, side, size, price, DATE(date) as day, date FROM trades ORDER BY date ASC`);
+        const trades = query(`SELECT market, side, size, price, type, DATE(date) as day, date FROM trades ORDER BY date ASC`);
         if (!trades.length) return;
 
         const firstDay = trades[0].day;
@@ -337,7 +337,17 @@
                     // Buy actions: Long, Open Long, Close Short
                     // Sell actions: Short, Open Short, Close Long
                     const _side = (t.side || "").trim().toLowerCase();
-                    const isBuy = _side === "long" || _side === "open long" || _side === "close short" || _side === "buy";
+                    const _type = (t.type || "").trim().toLowerCase();
+                    const isForced = _type === "liquidation" || _type === "deleverage";
+
+                    let isBuy;
+                    if (isForced) {
+                        // Liquidations always reduce/close the current position
+                        // Treat as sell if currently long, buy if currently short
+                        isBuy = direction === -1;
+                    } else {
+                        isBuy = _side === "long" || _side === "open long" || _side === "close short" || _side === "buy";
+                    }
                     const tSize = Math.abs(parseFloat(t.size));
                     const tPrice = parseFloat(t.price);
                     if (!(tSize > 0) || !(tPrice > 0)) continue;
@@ -468,9 +478,13 @@
     function updateEquityChart() {
         const hasOverlays = _activeMarkets.size > 0;
 
+        // Use [day, value] pairs so data aligns correctly regardless of xAxis range
         const series = [{
-            name: "TOTAL NET PNL", type: "line", data: _equityBaseVals, smooth: 0.3, symbol: "none",
+            name: "TOTAL NET PNL", type: "line",
+            data: _equityDays.map((d, i) => [d, _equityBaseVals[i]]),
+            smooth: 0.3, symbol: "none",
             lineStyle: { color: C.green, width: 3 },
+            itemStyle: { color: C.green },
             areaStyle: hasOverlays ? undefined : { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: C.green + "20" }, { offset: 1, color: C.green + "02" }]) },
             yAxisIndex: 0, z: 10,
         }];
@@ -480,12 +494,14 @@
             series.push({
                 name: "UNREALIZED", type: "line", data: _unrealizedDays.map((d, i) => [d, _unrealizedVals[i]]),
                 smooth: 0.3, symbol: "none",
-                lineStyle: { color: C.blue, width: 1.5, type: "dashed" }, itemStyle: { color: C.blue }, yAxisIndex: 0, z: 5,
+                lineStyle: { color: C.blue, width: 1.5, type: "dashed" },
+                itemStyle: { color: C.blue }, yAxisIndex: 0, z: 5,
             });
             series.push({
                 name: "TOTAL (R+U)", type: "line", data: _unrealizedDays.map((d, i) => [d, _totalVals[i]]),
                 smooth: 0.3, symbol: "none",
-                lineStyle: { color: "#fff", width: 1.5, opacity: 0.6 }, itemStyle: { color: "#fff" }, yAxisIndex: 0, z: 4,
+                lineStyle: { color: "#aaa", width: 1.5 },
+                itemStyle: { color: "#aaa" }, yAxisIndex: 0, z: 4,
             });
         }
 
@@ -493,7 +509,9 @@
         for (const market of _activeMarkets) {
             const color = PALETTE[(i + 1) % PALETTE.length];
             series.push({
-                name: market, type: "line", data: getMarketSeries(market), smooth: 0.3, symbol: "none",
+                name: market, type: "line",
+                data: _equityDays.map((d, i) => [d, getMarketSeries(market)[i]]),
+                smooth: 0.3, symbol: "none",
                 lineStyle: { color, width: 1.2, opacity: 0.8 }, itemStyle: { color }, yAxisIndex: 0, z: 2,
             });
             i++;
