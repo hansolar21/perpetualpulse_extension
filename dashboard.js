@@ -376,6 +376,10 @@
 
                 if (!queue.length) continue;
 
+                // Dust check: if position notional < $100 treat as flat (rounding residuals)
+                const roughNotional = queue.reduce((s, q) => s + q.size * q.price, 0);
+                if (roughNotional < 100) continue;
+
                 // Find close price — walk back up to 5 days for weekends/holidays
                 let closePrice = null;
                 for (let d = 0; d <= 5; d++) {
@@ -487,12 +491,6 @@
                 smooth: 0.3, symbol: "none",
                 lineStyle: { color: C.blue, width: 1.5, type: "dashed" },
                 itemStyle: { color: C.blue }, yAxisIndex: 0, z: 5,
-            });
-            series.push({
-                name: "TOTAL (R+U)", type: "line", data: _unrealizedDays.map((d, i) => [d, _totalVals[i]]),
-                smooth: 0.3, symbol: "none",
-                lineStyle: { color: "#aaa", width: 1.5 },
-                itemStyle: { color: "#aaa" }, yAxisIndex: 0, z: 4,
             });
         }
 
