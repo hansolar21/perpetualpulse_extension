@@ -1566,6 +1566,14 @@
     document.getElementById("btn-settings").addEventListener("click", openSettings);
     document.getElementById("btn-settings-close").addEventListener("click", () => { overlay.style.display = "none"; });
     overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
+    document.getElementById("btn-clear-price-cache").addEventListener("click", () => {
+        chrome.storage.local.remove("pp_price_cache", () => {
+            const s = document.getElementById("settings-status");
+            s.textContent = "Price cache cleared ✓";
+            setTimeout(() => { s.textContent = ""; }, 2500);
+        });
+    });
+
     document.getElementById("btn-settings-save").addEventListener("click", () => {
         const s = {
             initial_equity: document.getElementById("setting-initial-equity").value,
