@@ -264,12 +264,12 @@
                 if (v > 0) return v;
             }
         }
-        // Fallback: "Account Value" label
+        // Fallback: known equity label variants
         for (const row of rows) {
             const children = row.children;
             if (children.length < 2) continue;
             const labelText = (children[0].textContent || "").trim();
-            if (/Account Value/i.test(labelText)) {
+            if (/Account Value|Portfolio Value|Total Value|Net Worth/i.test(labelText)) {
                 const valText = (children[children.length - 1].textContent || "").trim();
                 const v = parseUSD(valText);
                 if (v > 0) return v;
