@@ -492,6 +492,12 @@
                 lineStyle: { color: C.blue, width: 1.5, type: "dashed" },
                 itemStyle: { color: C.blue }, yAxisIndex: 0, z: 5,
             });
+            series.push({
+                name: "TOTAL (R+U)", type: "line", data: _unrealizedDays.map((d, i) => [d, _totalVals[i]]),
+                smooth: 0.3, symbol: "none",
+                lineStyle: { color: "#aaa", width: 1.5 },
+                itemStyle: { color: "#aaa" }, yAxisIndex: 0, z: 4,
+            });
         }
 
         let i = 0;
