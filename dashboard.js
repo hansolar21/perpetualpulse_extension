@@ -86,8 +86,9 @@
     function fmtTooltip(params) {
         let s = params[0].axisValue;
         for (const p of params) {
+            const v = Array.isArray(p.value) ? p.value[1] : p.value;
             const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
-            s += `<br/>${dot}${p.seriesName}: <b>${fmt(p.value)}</b>`;
+            s += `<br/>${dot}${p.seriesName}: <b>${fmt(v)}</b>`;
         }
         return s;
     }
@@ -478,10 +479,16 @@
     function updateEquityChart() {
         const hasOverlays = _activeMarkets.size > 0;
 
-        // Use [day, value] pairs so data aligns correctly regardless of xAxis range
+        // Dense arrays aligned to xDays for correct tooltip snapping on category axis
+        const xDays = (_showUnrealized && _unrealizedDays.length) ? _unrealizedDays : _equityDays;
+        const realByDay = {};
+        _equityDays.forEach((d, i) => realByDay[d] = _equityBaseVals[i]);
+        let _lastReal = 0;
+        const realAligned = xDays.map(d => { if (realByDay[d] !== undefined) _lastReal = realByDay[d]; return _lastReal; });
+
         const series = [{
             name: "TOTAL NET PNL", type: "line",
-            data: _equityDays.map((d, i) => [d, _equityBaseVals[i]]),
+            data: realAligned,
             smooth: 0.3, symbol: "none",
             lineStyle: { color: C.green, width: 3 },
             itemStyle: { color: C.green },
@@ -492,13 +499,13 @@
         // Unrealized + Total overlay
         if (_showUnrealized && _unrealizedDays.length) {
             series.push({
-                name: "UNREALIZED", type: "line", data: _unrealizedDays.map((d, i) => [d, _unrealizedVals[i]]),
+                name: "UNREALIZED", type: "line", data: _unrealizedVals,
                 smooth: 0.3, symbol: "none",
                 lineStyle: { color: C.blue, width: 1.5, type: "dashed" },
                 itemStyle: { color: C.blue }, yAxisIndex: 0, z: 5,
             });
             series.push({
-                name: "TOTAL (R+U)", type: "line", data: _unrealizedDays.map((d, i) => [d, _totalVals[i]]),
+                name: "TOTAL (R+U)", type: "line", data: _totalVals,
                 smooth: 0.3, symbol: "none",
                 lineStyle: { color: "#aaa", width: 1.5 },
                 itemStyle: { color: "#aaa" }, yAxisIndex: 0, z: 4,
@@ -510,15 +517,12 @@
             const color = PALETTE[(i + 1) % PALETTE.length];
             series.push({
                 name: market, type: "line",
-                data: _equityDays.map((d, i) => [d, getMarketSeries(market)[i]]),
+                data: getMarketSeries(market),
                 smooth: 0.3, symbol: "none",
                 lineStyle: { color, width: 1.2, opacity: 0.8 }, itemStyle: { color }, yAxisIndex: 0, z: 2,
             });
             i++;
         }
-
-        // Use combined day range if unrealized is loaded
-        const xDays = (_showUnrealized && _unrealizedDays.length) ? _unrealizedDays : _equityDays;
 
         _equityChart.setOption({
             tooltip: { ...tooltipBase(), formatter: fmtTooltip },
