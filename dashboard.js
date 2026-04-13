@@ -209,12 +209,14 @@
     }
 
     async function fetchDailyCloses(symbol, startMs, endMs) {
-        // Check cache first
-        const cacheKey = "pp_price_cache";
-        const cached = await new Promise(r => chrome.storage.local.get(cacheKey, r));
-        const cache = cached[cacheKey] || {};
-        const key = `${symbol}_${Math.floor(startMs/86400000)}_${Math.floor(endMs/86400000)}`;
-        if (cache[key]) return cache[key];
+        const CACHE_KEY = "pp_price_cache";
+        const CACHE_TTL_MS = 23 * 60 * 60 * 1000; // re-fetch once per day
+        const cached = await new Promise(r => chrome.storage.local.get(CACHE_KEY, r));
+        const cache = cached[CACHE_KEY] || {};
+        // Key by symbol+startDay only — stable across runs on the same dataset
+        const key = `${symbol}_${Math.floor(startMs / 86400000)}`;
+        const entry = cache[key];
+        if (entry && (Date.now() - entry.fetchedAt) < CACHE_TTL_MS) return entry.candles;
 
         const fetchKlines = async (base, sym) => {
             const url = `${base}?symbol=${sym}&interval=1d&startTime=${startMs}&endTime=${endMs}&limit=1000`;
@@ -222,16 +224,12 @@
             if (!r.ok) throw new Error(r.status);
             const data = await r.json();
             if (!Array.isArray(data) || !data.length) throw new Error("empty");
-            // [{ts: openTime, close: closePrice}]
             return data.map(c => ({ ts: c[0], close: parseFloat(c[4]) }));
         };
 
         let candles = null;
-        // Try Binance perps
         try { candles = await fetchKlines("https://fapi.binance.com/fapi/v1/klines", symbol); } catch {}
-        // Try Binance spot
         if (!candles) try { candles = await fetchKlines("https://api.binance.com/api/v3/klines", symbol); } catch {}
-        // Try HL candles
         if (!candles) try {
             const coin = symbol.replace(/USDT$/i, "");
             const body = { type: "candleSnapshot", req: { coin, interval: "1d", startTime: startMs, endTime: endMs } };
@@ -244,12 +242,11 @@
 
         if (!candles) return null;
 
-        // Cache it
-        cache[key] = candles;
-        // Prune cache to keep it under ~5MB (keep last 200 entries)
+        // Store with timestamp; prune to 300 entries
+        cache[key] = { candles, fetchedAt: Date.now() };
         const keys = Object.keys(cache);
-        if (keys.length > 200) for (const k of keys.slice(0, keys.length - 200)) delete cache[k];
-        chrome.storage.local.set({ [cacheKey]: cache });
+        if (keys.length > 300) for (const k of keys.slice(0, keys.length - 300)) delete cache[k];
+        chrome.storage.local.set({ [CACHE_KEY]: cache });
         return candles;
     }
 
