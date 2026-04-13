@@ -341,12 +341,17 @@
                     const isForced = _type === "liquidation" || _type === "deleverage";
 
                     let isBuy;
-                    if (isForced) {
-                        // Liquidations always reduce/close the current position
-                        // Treat as sell if currently long, buy if currently short
+                    const isOldFormat = _side === "long" || _side === "short";
+                    if (isForced && isOldFormat) {
+                        // Old-format liquidation ("Long"/"Short") — side is ambiguous,
+                        // always treat as closing the current position
                         isBuy = direction === -1;
                     } else {
-                        isBuy = _side === "long" || _side === "open long" || _side === "close short" || _side === "buy";
+                        // New-format trades + new-format liquidations use explicit side
+                        // 'Short > Long' = crossed zero from short to long (net buy)
+                        // 'Long > Short' = crossed zero from long to short (net sell)
+                        isBuy = _side === "long" || _side === "open long" || _side === "close short"
+                            || _side === "buy" || _side === "short > long";
                     }
                     const tSize = Math.abs(parseFloat(t.size));
                     const tPrice = parseFloat(t.price);
