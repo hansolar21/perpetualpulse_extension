@@ -328,6 +328,7 @@
             let direction = 0; // 1=long, -1=short, 0=flat
             let tradeIdx = 0;
             let maxMarketUnreal = 0;
+            const debugMarket = market === "ETH"; // trace first offender
 
             for (const day of allDays) {
                 // Process all trades up to end of this day
@@ -337,6 +338,8 @@
                     const tSize = Math.abs(parseFloat(t.size));
                     const tPrice = parseFloat(t.price);
                     if (!(tSize > 0) || !(tPrice > 0)) continue;
+
+                    const qSizeBefore = queue.reduce((s, q) => s + q.size, 0);
 
                     if (queue.length === 0) {
                         direction = isBuy ? 1 : -1;
@@ -356,6 +359,11 @@
                             direction = isBuy ? 1 : -1;
                             queue.push({ price: tPrice, size: rem });
                         }
+                    }
+
+                    if (debugMarket && tradeIdx <= 20) {
+                        const qSizeAfter = queue.reduce((s, q) => s + q.size, 0);
+                        console.log(`[wDNA ETH] trade#${tradeIdx} ${t.side} ${tSize.toFixed(3)} @ ${tPrice} | dir=${direction} qBefore=${qSizeBefore.toFixed(3)} qAfter=${qSizeAfter.toFixed(3)}`);
                     }
                 }
 
