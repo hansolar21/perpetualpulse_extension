@@ -246,15 +246,6 @@
                         return p;
                     }
                 }
-                // Strategy 3: positions table grandparent (reliable fallback — sibling panel usually nearby)
-                const posTable = document.querySelector("table");
-                if (posTable) {
-                    let el = posTable.parentElement;
-                    for (let i = 0; i < 6 && el; i++) {
-                        if (el.children.length >= 2 && el.children.length < 30) return el;
-                        el = el.parentElement;
-                    }
-                }
                 return null;
             },
 
