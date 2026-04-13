@@ -399,10 +399,25 @@
                 }
             });
 
-            // Store unrealized PnL to chrome.storage for the dashboard
+            // Try to read unrealized PnL directly from the HL account summary panel
+            // (more reliable than parsing the table's PnL column)
+            let hlUnrealized = unrealizedSum;
+            const allDivs = document.querySelectorAll("div");
+            for (const d of allDivs) {
+                if ((d.textContent || "").trim() === "Unrealized PNL") {
+                    const row = d.closest("div[style*='justify-content: space-between']") ||
+                                d.parentElement?.parentElement;
+                    if (row) {
+                        const valEl = row.querySelector("span") || row.lastElementChild;
+                        const parsed = parseUSD((valEl?.textContent || ""));
+                        if (parsed !== 0 || valEl?.textContent?.includes("0")) { hlUnrealized = parsed; break; }
+                    }
+                }
+            }
+            // Store to chrome.storage for the dashboard
             chrome.storage.local.get("pp_unrealized_pnl", (existing) => {
                 const prev = existing.pp_unrealized_pnl || {};
-                chrome.storage.local.set({ pp_unrealized_pnl: { ...prev, hl: unrealizedSum, ts: Date.now() } });
+                chrome.storage.local.set({ pp_unrealized_pnl: { ...prev, hl: hlUnrealized, ts: Date.now() } });
             });
 
             // Find the account container to inject metrics

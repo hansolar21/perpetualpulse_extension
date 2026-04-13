@@ -220,7 +220,7 @@
             // Account section — find the perps account panel
             getAccountContainer: () => {
                 // Strategy 1: leaf div whose text exactly matches known labels
-                const labels = ["Perps Overview", "Account Overview", "Account Summary", "Portfolio Overview"];
+                const labels = ["Unified Account Summary", "Perps Overview", "Account Overview", "Account Summary", "Portfolio Overview"];
                 const leaves = document.querySelectorAll("div, span");
                 for (const d of leaves) {
                     const txt = (d.textContent || "").trim();
