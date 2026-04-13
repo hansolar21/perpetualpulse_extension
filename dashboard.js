@@ -1498,6 +1498,7 @@
     async function init() {
         try {
             _db = await loadDB();
+            window._ppQuery = (sql) => { if (!_db) return []; try { const r = _db.exec(sql); if (!r.length) return []; return r[0].values.map((row) => { const o = {}; r[0].columns.forEach((c,i) => o[c]=row[i]); return o; }); } catch(e) { return e.message; } };
             if (!_db) { document.getElementById("status-text").textContent = "No trade data. Open app.lighter.xyz first to sync."; return; }
             renderSummary();
             renderEquityCurve();
