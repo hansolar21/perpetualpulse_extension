@@ -217,34 +217,42 @@
             },
             positionRowSelector: "tbody tr:not(:first-child)",
 
-            // Account section — walk up from "Perps Overview" to find scrollable container
+            // Account section — find the perps account panel
             getAccountContainer: () => {
-                // Find the "Perps Overview" text node and walk up
-                const all = document.querySelectorAll("div");
-                for (const d of all) {
-                    // Check direct text content (not deep) to find the label div
-                    const fc = d.firstChild;
-                    if (fc && fc.nodeType === 3 && fc.textContent.trim() === "Perps Overview") {
-                        let parent = d.parentElement;
-                        for (let i = 0; i < 8 && parent; i++) {
-                            const txt = parent.textContent || "";
-                            if (/Account Equity/.test(txt) && /Perps Overview/.test(txt)) {
-                                // Check it has some structure (not the whole page)
-                                if (parent.children.length < 50) return parent;
-                            }
-                            parent = parent.parentElement;
+                // Strategy 1: leaf div whose text exactly matches known labels
+                const labels = ["Perps Overview", "Account Overview", "Account Summary", "Portfolio Overview"];
+                const leaves = document.querySelectorAll("div, span");
+                for (const d of leaves) {
+                    const txt = (d.textContent || "").trim();
+                    if (!labels.some((l) => l === txt)) continue;
+                    let parent = d.parentElement;
+                    for (let i = 0; i < 10 && parent; i++) {
+                        const ptxt = parent.textContent || "";
+                        const childCount = parent.children.length;
+                        if (childCount >= 2 && childCount < 60 &&
+                            (/Account.*Equity|Account.*Value|Portfolio.*Value/i.test(ptxt) || /Margin|P&L|Unrealized/i.test(ptxt))) {
+                            return parent;
                         }
+                        parent = parent.parentElement;
                     }
-                    // Also check innerText match for styled-component rendered text
-                    if (d.children.length === 0 && d.textContent.trim() === "Perps Overview") {
-                        let parent = d.parentElement;
-                        for (let i = 0; i < 8 && parent; i++) {
-                            const txt = parent.textContent || "";
-                            if (/Account Equity/.test(txt) && /Perps Overview/.test(txt) && parent.children.length < 50) {
-                                return parent;
-                            }
-                            parent = parent.parentElement;
-                        }
+                }
+                // Strategy 2: find a panel containing both an equity-like number and margin info
+                const panels = document.querySelectorAll("div[class*='flex'][class*='col'], div[class*='panel'], div[class*='account'], div[class*='sidebar']");
+                for (const p of panels) {
+                    const txt = p.textContent || "";
+                    if (p.children.length >= 2 && p.children.length < 60 &&
+                        /Account.*Equity|Account.*Value|Perp.*Overview/i.test(txt) &&
+                        /Margin|Leverage|P&L/i.test(txt)) {
+                        return p;
+                    }
+                }
+                // Strategy 3: positions table grandparent (reliable fallback — sibling panel usually nearby)
+                const posTable = document.querySelector("table");
+                if (posTable) {
+                    let el = posTable.parentElement;
+                    for (let i = 0; i < 6 && el; i++) {
+                        if (el.children.length >= 2 && el.children.length < 30) return el;
+                        el = el.parentElement;
                     }
                 }
                 return null;

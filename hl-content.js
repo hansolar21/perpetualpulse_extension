@@ -406,8 +406,25 @@
             });
 
             // Find the account container to inject metrics
-            const container = cfg.getAccountContainer();
-            if (!container) return;
+            let container = cfg.getAccountContainer();
+            if (!container) {
+                // Hard fallback: use a fixed overlay anchored above the positions table
+                const existingOverlay = document.getElementById("pp-hl-overlay");
+                if (existingOverlay) {
+                    container = existingOverlay;
+                } else {
+                    const overlay = document.createElement("div");
+                    overlay.id = "pp-hl-overlay";
+                    overlay.style.cssText = [
+                        "position:fixed","bottom:80px","right:16px","z-index:9999",
+                        "background:#1a1d23","border:1px solid #2a2d35","border-radius:6px",
+                        "padding:8px 12px","font-size:11px","font-family:monospace",
+                        "color:#cdd","min-width:240px","pointer-events:none",
+                    ].join(";");
+                    document.body.appendChild(overlay);
+                    container = overlay;
+                }
+            }
 
             // Remove old injections (but keep wrapper for reuse)
             container.querySelectorAll('[data-injected="pp-hl"]').forEach((el) => el.remove());
