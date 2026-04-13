@@ -177,7 +177,9 @@
 
     // Normalize market name → Binance symbol (BTCUSDT etc)
     function toBinanceSymbol(market) {
-        const m = market.toUpperCase().replace(/[^A-Z0-9]/g, "");
+        // Strip /USDC, /USD, /USDT suffixes (e.g. "ETH/USDC" → "ETH")
+        const base = market.replace(/[\/_](usdc|usdt|usd)$/i, "").trim();
+        const m = base.toUpperCase().replace(/[^A-Z0-9]/g, "");
         // Already has USDT suffix
         if (m.endsWith("USDT")) return m;
         // Known remaps
@@ -263,7 +265,7 @@
 
         // 2. Get unique markets (skip Korean stocks — no price data)
         const markets = [...new Set(trades.map(t => t.market))]
-            .filter(m => !/(SAMSUNG|SKHYNIX|KRCOMP|HYUNDAI|HANMI|USDKRW)/i.test(m));
+            .filter(m => !/(SAMSUNG|SKHYNIX|KRCOMP|HYUNDAI|HANMI|USDKRW|^WTI$|^XCU$|^URA$|^LIT$)/i.test(m));
 
         // 3. Fetch daily closes for all markets
         const closes = {}; // { market: { 'YYYY-MM-DD': close } }
