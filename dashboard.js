@@ -334,7 +334,11 @@
                 // Process all trades up to end of this day
                 while (tradeIdx < mTrades.length && mTrades[tradeIdx].day <= day) {
                     const t = mTrades[tradeIdx++];
-                    const isBuy = t.side === "Long" || t.side === "long" || t.side === "buy" || t.side === "Buy";
+                    // Side formats: old="Long"/"Short", new="Open Long"/"Close Long"/"Open Short"/"Close Short"
+                    // Buy actions: Long, Open Long, Close Short
+                    // Sell actions: Short, Open Short, Close Long
+                    const _side = (t.side || "").trim().toLowerCase();
+                    const isBuy = _side === "long" || _side === "open long" || _side === "close short" || _side === "buy";
                     const tSize = Math.abs(parseFloat(t.size));
                     const tPrice = parseFloat(t.price);
                     if (!(tSize > 0) || !(tPrice > 0)) continue;
