@@ -262,7 +262,7 @@
 
         // 2. Get unique markets (skip Korean stocks — no price data)
         const markets = [...new Set(trades.map(t => t.market))]
-            .filter(m => !/(SAMSUNG|SKHYNIX|KRCOMP|HYUNDAI|HANMI|USDKRW|^WTI$|^XCU$|^URA$|^LIT$)/i.test(m));
+            .filter(m => !/(SAMSUNG|SKHYNIX|KRCOMP|HYUNDAI|HANMI|USDKRW|^WTI$|^XCU$|^URA$|^LIT$|USDC$|USDT$)/i.test(m));
 
         // 3. Fetch daily closes for all markets
         const closes = {}; // { market: { 'YYYY-MM-DD': close } }
