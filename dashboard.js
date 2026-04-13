@@ -303,44 +303,56 @@
         // For each market, compute daily open position via FIFO
         const dailyUnreal = {}; // { 'YYYY-MM-DD': unrealized_pnl_sum }
 
+        const marketDebug = []; // for sanity logging
+
         for (const market of markets) {
             const mTrades = tradesByMarket[market] || [];
             if (!mTrades.length) continue;
             const mCloses = closes[market];
             if (!mCloses) continue;
 
+            // Sanity: first close price should be within 50x of first trade price
+            const firstTradePrice = parseFloat(mTrades[0].price);
+            const firstCloseDay = Object.keys(mCloses).sort()[0];
+            const firstClosePrice = firstCloseDay ? mCloses[firstCloseDay] : null;
+            if (firstClosePrice && firstTradePrice > 0) {
+                const ratio = firstClosePrice / firstTradePrice;
+                if (ratio > 50 || ratio < 0.02) {
+                    console.warn(`[wDNA] Skipping ${market}: price mismatch entry=${firstTradePrice} close=${firstClosePrice} ratio=${ratio.toFixed(2)}`);
+                    continue;
+                }
+            }
+
             // FIFO queue: [{price, size}]
-            let queue = []; // long queue
+            let queue = [];
             let direction = 0; // 1=long, -1=short, 0=flat
             let tradeIdx = 0;
+            let maxMarketUnreal = 0;
 
             for (const day of allDays) {
                 // Process all trades up to end of this day
                 while (tradeIdx < mTrades.length && mTrades[tradeIdx].day <= day) {
                     const t = mTrades[tradeIdx++];
-                    const isBuy = t.side === "buy" || t.side === "Buy" || t.side === "long" || t.side === "Long";
-                    const isSell = !isBuy;
+                    const isBuy = t.side === "Long" || t.side === "long" || t.side === "buy" || t.side === "Buy";
                     const tSize = Math.abs(parseFloat(t.size));
                     const tPrice = parseFloat(t.price);
+                    if (!(tSize > 0) || !(tPrice > 0)) continue;
 
                     if (queue.length === 0) {
-                        // Flat → open new position
                         direction = isBuy ? 1 : -1;
                         queue.push({ price: tPrice, size: tSize });
-                    } else if ((isBuy && direction === 1) || (isSell && direction === -1)) {
-                        // Adding to existing direction
+                    } else if ((isBuy && direction === 1) || (!isBuy && direction === -1)) {
                         queue.push({ price: tPrice, size: tSize });
                     } else {
-                        // Reducing / closing opposite side
+                        // Reducing/closing
                         let rem = tSize;
-                        while (rem > 0 && queue.length > 0) {
+                        while (rem > 1e-10 && queue.length > 0) {
                             const front = queue[0];
-                            if (front.size <= rem) { rem -= front.size; queue.shift(); }
+                            if (front.size <= rem + 1e-10) { rem = Math.max(0, rem - front.size); queue.shift(); }
                             else { front.size -= rem; rem = 0; }
                         }
                         if (queue.length === 0) direction = 0;
-                        // If rem > 0, flip direction (rare, handle simply)
-                        if (rem > 1e-10) {
+                        if (rem > 1e-8) {
                             direction = isBuy ? 1 : -1;
                             queue.push({ price: tPrice, size: rem });
                         }
@@ -357,16 +369,27 @@
                 }
                 if (!closePrice) continue;
 
-                // Compute unrealized PnL for this market on this day
                 let totalSize = 0, weightedPrice = 0;
                 for (const q of queue) { totalSize += q.size; weightedPrice += q.price * q.size; }
                 const avgEntry = weightedPrice / totalSize;
                 const unreal = (closePrice - avgEntry) * totalSize * direction;
 
+                // Sanity cap: skip if unrealized exceeds 5x the total traded notional for this market
+                const totalNotional = mTrades.reduce((s, t) => s + Math.abs(parseFloat(t.size) * parseFloat(t.price)), 0);
+                if (Math.abs(unreal) > totalNotional * 5) {
+                    console.warn(`[wDNA] Skipping implausible unrealized for ${market} on ${day}: unreal=${unreal.toFixed(0)} notional=${totalNotional.toFixed(0)} avgEntry=${avgEntry.toFixed(4)} closePrice=${closePrice}`);
+                    continue;
+                }
+
                 if (!dailyUnreal[day]) dailyUnreal[day] = 0;
                 dailyUnreal[day] += unreal;
+                if (Math.abs(unreal) > Math.abs(maxMarketUnreal)) maxMarketUnreal = unreal;
             }
+
+            marketDebug.push({ market, symbol: toBinanceSymbol(market), firstTradePrice, firstClosePrice, maxMarketUnreal });
         }
+
+        console.table(marketDebug.sort((a, b) => Math.abs(b.maxMarketUnreal) - Math.abs(a.maxMarketUnreal)));
 
         // 5. Align with equity curve days and store
         _unrealizedDays = allDays;
