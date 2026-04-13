@@ -391,7 +391,10 @@
 
                 if (!dailyUnreal[day]) dailyUnreal[day] = 0;
                 dailyUnreal[day] += unreal;
-                if (Math.abs(unreal) > Math.abs(maxMarketUnreal)) maxMarketUnreal = unreal;
+                if (Math.abs(unreal) > Math.abs(maxMarketUnreal)) {
+                    maxMarketUnreal = unreal;
+                    if (debugMarket) console.log(`[wDNA ETH] NEW MAX on ${day}: unreal=${unreal.toFixed(0)} totalSize=${totalSize.toFixed(4)} avgEntry=${avgEntry.toFixed(2)} closePrice=${closePrice}`);
+                }
             }
 
             marketDebug.push({ market, symbol: toBinanceSymbol(market), firstTradePrice, firstClosePrice, maxMarketUnreal });
