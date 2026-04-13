@@ -169,6 +169,224 @@
     let _activeMarkets = new Set();
     let _marketDailyPnl = {};
 
+    // ---- Historical Unrealized PnL ----
+    let _unrealizedDays = [];
+    let _unrealizedVals = [];  // unrealized PnL per day
+    let _totalVals = [];       // realized + unrealized
+    let _showUnrealized = false;
+
+    // Normalize market name → Binance symbol (BTCUSDT etc)
+    function toBinanceSymbol(market) {
+        const m = market.toUpperCase().replace(/[^A-Z0-9]/g, "");
+        // Already has USDT suffix
+        if (m.endsWith("USDT")) return m;
+        // Known remaps
+        const remap = { "BTC": "BTCUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT", "BNB": "BNBUSDT",
+            "TRUMP": "TRUMPUSDT", "HYPE": "HYPEUSDT", "DOGE": "DOGEUSDT", "XRP": "XRPUSDT",
+            "AVAX": "AVAXUSDT", "LINK": "LINKUSDT", "ARB": "ARBUSDT", "OP": "OPUSDT",
+            "AAVE": "AAVEUSDT", "UNI": "UNIUSDT", "SUI": "SUIUSDT", "SEI": "SEIUSDT",
+            "APT": "APTUSDT", "INJ": "INJUSDT", "TIA": "TIAUSDT", "ATOM": "ATOMUSDT",
+            "NEAR": "NEARUSDT", "FIL": "FILUSDT", "LTC": "LTCUSDT", "ADA": "ADAUSDT",
+            "DOT": "DOTUSDT", "MATIC": "MATICUSDT", "FTM": "FTMUSDT", "WIF": "WIFUSDT",
+            "PEPE": "PEPEUSDT", "BONK": "BONKUSDT", "JTO": "JTOUSDT", "PYTH": "PYTHUSDT",
+            "JUP": "JUPUSDT", "STRK": "STRKUSDT", "W": "WUSDT", "ENA": "ENAUSDT",
+            "EIGEN": "EIGENUSDT", "ZRO": "ZROUSDT", "NOT": "NOTUSDT", "IO": "IOUSDT",
+            "ZK": "ZKUSDT", "CATI": "CATIUSDT", "HMSTR": "HMSTRUSDT", "BB": "BBUSDT",
+            "LISTA": "LISTAUSDT", "RENDER": "RENDERUSDT", "ONDO": "ONDOUSDT",
+            "PENDLE": "PENDLEUSDT", "PIXEL": "PIXELUSDT", "PORTAL": "PORTALUSDT",
+            "ALT": "ALTUSDT", "MANTA": "MANTAUSDT", "DYM": "DYMUSDT", "ORDI": "ORDIUSDT",
+            "SATS": "1000SATSUSDT", "WLD": "WLDUSDT", "CYBER": "CYBERUSDT",
+            "ARKM": "ARKMUSDT", "FRONT": "FRONTUSDT", "YGG": "YGGUSDT",
+            "STMX": "STMXUSDT", "GAS": "GASUSDT", "BLUR": "BLURUSDT",
+            "MAGIC": "MAGICUSDT", "HOOK": "HOOKUSDT", "HIGH": "HIGHUSDT",
+            "PEOPLE": "PEOPLEUSDT", "LQTY": "LQTYUSDT", "POL": "POLUSDT",
+            "SAGA": "SAGAUSDT", "REZ": "REZUSDT", "BOME": "BOMEUSDT",
+            "0G": "AGIAUSDT", "ZEN": "ZENUSDT", "PROM": "PROMUSDT",
+        };
+        return remap[m] || (m + "USDT");
+    }
+
+    async function fetchDailyCloses(symbol, startMs, endMs) {
+        // Check cache first
+        const cacheKey = "pp_price_cache";
+        const cached = await new Promise(r => chrome.storage.local.get(cacheKey, r));
+        const cache = cached[cacheKey] || {};
+        const key = `${symbol}_${Math.floor(startMs/86400000)}_${Math.floor(endMs/86400000)}`;
+        if (cache[key]) return cache[key];
+
+        const fetchKlines = async (base, sym) => {
+            const url = `${base}?symbol=${sym}&interval=1d&startTime=${startMs}&endTime=${endMs}&limit=1000`;
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(r.status);
+            const data = await r.json();
+            if (!Array.isArray(data) || !data.length) throw new Error("empty");
+            // [{ts: openTime, close: closePrice}]
+            return data.map(c => ({ ts: c[0], close: parseFloat(c[4]) }));
+        };
+
+        let candles = null;
+        // Try Binance perps
+        try { candles = await fetchKlines("https://fapi.binance.com/fapi/v1/klines", symbol); } catch {}
+        // Try Binance spot
+        if (!candles) try { candles = await fetchKlines("https://api.binance.com/api/v3/klines", symbol); } catch {}
+        // Try HL candles
+        if (!candles) try {
+            const coin = symbol.replace(/USDT$/i, "");
+            const body = { type: "candleSnapshot", req: { coin, interval: "1d", startTime: startMs, endTime: endMs } };
+            const r = await fetch("https://api.hyperliquid.xyz/info", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+            if (r.ok) {
+                const data = await r.json();
+                if (Array.isArray(data)) candles = data.map(c => ({ ts: c.t, close: parseFloat(c.c) }));
+            }
+        } catch {}
+
+        if (!candles) return null;
+
+        // Cache it
+        cache[key] = candles;
+        // Prune cache to keep it under ~5MB (keep last 200 entries)
+        const keys = Object.keys(cache);
+        if (keys.length > 200) for (const k of keys.slice(0, keys.length - 200)) delete cache[k];
+        chrome.storage.local.set({ [cacheKey]: cache });
+        return candles;
+    }
+
+    async function computeHistoricalUnrealized(onProgress) {
+        // 1. Load all trades ordered by time
+        const trades = query(`SELECT market, side, size, price, DATE(date) as day, date FROM trades ORDER BY date ASC`);
+        if (!trades.length) return;
+
+        const firstDay = trades[0].day;
+        const lastDay = new Date().toISOString().slice(0, 10);
+        const startMs = new Date(firstDay).getTime();
+        const endMs = Date.now();
+
+        // 2. Get unique markets (skip Korean stocks — no price data)
+        const markets = [...new Set(trades.map(t => t.market))]
+            .filter(m => !/(SAMSUNG|SKHYNIX|KRCOMP|HYUNDAI|HANMI|USDKRW)/i.test(m));
+
+        // 3. Fetch daily closes for all markets
+        const closes = {}; // { market: { 'YYYY-MM-DD': close } }
+        let fetched = 0;
+        for (const market of markets) {
+            const symbol = toBinanceSymbol(market);
+            if (onProgress) onProgress(`Fetching ${symbol} (${++fetched}/${markets.length})...`);
+            const candles = await fetchDailyCloses(symbol, startMs, endMs);
+            if (candles) {
+                closes[market] = {};
+                for (const c of candles) {
+                    const day = new Date(c.ts).toISOString().slice(0, 10);
+                    closes[market][day] = c.close;
+                }
+            }
+            // Small delay to be polite to Binance
+            await new Promise(r => setTimeout(r, 80));
+        }
+
+        // 4. FIFO position reconstruction per market per day
+        // Group trades by market
+        const tradesByMarket = {};
+        for (const t of trades) {
+            if (!tradesByMarket[t.market]) tradesByMarket[t.market] = [];
+            tradesByMarket[t.market].push(t);
+        }
+
+        // Generate all days from start to today
+        const allDays = [];
+        const cur = new Date(firstDay);
+        const end = new Date(lastDay);
+        while (cur <= end) {
+            allDays.push(cur.toISOString().slice(0, 10));
+            cur.setDate(cur.getDate() + 1);
+        }
+
+        // For each market, compute daily open position via FIFO
+        const dailyUnreal = {}; // { 'YYYY-MM-DD': unrealized_pnl_sum }
+
+        for (const market of markets) {
+            const mTrades = tradesByMarket[market] || [];
+            if (!mTrades.length) continue;
+            const mCloses = closes[market];
+            if (!mCloses) continue;
+
+            // FIFO queue: [{price, size}]
+            let queue = []; // long queue
+            let direction = 0; // 1=long, -1=short, 0=flat
+            let tradeIdx = 0;
+
+            for (const day of allDays) {
+                // Process all trades up to end of this day
+                while (tradeIdx < mTrades.length && mTrades[tradeIdx].day <= day) {
+                    const t = mTrades[tradeIdx++];
+                    const isBuy = t.side === "buy" || t.side === "Buy" || t.side === "long" || t.side === "Long";
+                    const isSell = !isBuy;
+                    const tSize = Math.abs(parseFloat(t.size));
+                    const tPrice = parseFloat(t.price);
+
+                    if (queue.length === 0) {
+                        // Flat → open new position
+                        direction = isBuy ? 1 : -1;
+                        queue.push({ price: tPrice, size: tSize });
+                    } else if ((isBuy && direction === 1) || (isSell && direction === -1)) {
+                        // Adding to existing direction
+                        queue.push({ price: tPrice, size: tSize });
+                    } else {
+                        // Reducing / closing opposite side
+                        let rem = tSize;
+                        while (rem > 0 && queue.length > 0) {
+                            const front = queue[0];
+                            if (front.size <= rem) { rem -= front.size; queue.shift(); }
+                            else { front.size -= rem; rem = 0; }
+                        }
+                        if (queue.length === 0) direction = 0;
+                        // If rem > 0, flip direction (rare, handle simply)
+                        if (rem > 1e-10) {
+                            direction = isBuy ? 1 : -1;
+                            queue.push({ price: tPrice, size: rem });
+                        }
+                    }
+                }
+
+                if (!queue.length) continue;
+
+                // Find close price — walk back up to 5 days for weekends/holidays
+                let closePrice = null;
+                for (let d = 0; d <= 5; d++) {
+                    const checkDay = new Date(new Date(day).getTime() - d * 86400000).toISOString().slice(0, 10);
+                    if (mCloses[checkDay]) { closePrice = mCloses[checkDay]; break; }
+                }
+                if (!closePrice) continue;
+
+                // Compute unrealized PnL for this market on this day
+                let totalSize = 0, weightedPrice = 0;
+                for (const q of queue) { totalSize += q.size; weightedPrice += q.price * q.size; }
+                const avgEntry = weightedPrice / totalSize;
+                const unreal = (closePrice - avgEntry) * totalSize * direction;
+
+                if (!dailyUnreal[day]) dailyUnreal[day] = 0;
+                dailyUnreal[day] += unreal;
+            }
+        }
+
+        // 5. Align with equity curve days and store
+        _unrealizedDays = allDays;
+        _unrealizedVals = allDays.map(d => Math.round((dailyUnreal[d] || 0) * 100) / 100);
+
+        // Cumulative realized for the same day range
+        const realMap = {};
+        let rCum = 0;
+        for (let i = 0; i < _equityDays.length; i++) { rCum = _equityBaseVals[i]; realMap[_equityDays[i]] = rCum; }
+        let lastReal = 0;
+        _totalVals = allDays.map(d => {
+            if (realMap[d] !== undefined) lastReal = realMap[d];
+            return Math.round((lastReal + (dailyUnreal[d] || 0)) * 100) / 100;
+        });
+
+        if (onProgress) onProgress(null); // done
+        _showUnrealized = true;
+        updateEquityChart();
+    }
+
     function computeEquityData() {
         const data = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) as pnl, SUM(fee) as fees
             FROM trades GROUP BY day ORDER BY day`);
@@ -220,6 +438,20 @@
             yAxisIndex: 0, z: 10,
         }];
 
+        // Unrealized + Total overlay
+        if (_showUnrealized && _unrealizedDays.length) {
+            series.push({
+                name: "UNREALIZED", type: "line", data: _unrealizedDays.map((d, i) => [d, _unrealizedVals[i]]),
+                smooth: 0.3, symbol: "none",
+                lineStyle: { color: C.blue, width: 1.5, type: "dashed" }, itemStyle: { color: C.blue }, yAxisIndex: 0, z: 5,
+            });
+            series.push({
+                name: "TOTAL (R+U)", type: "line", data: _unrealizedDays.map((d, i) => [d, _totalVals[i]]),
+                smooth: 0.3, symbol: "none",
+                lineStyle: { color: "#fff", width: 1.5, opacity: 0.6 }, itemStyle: { color: "#fff" }, yAxisIndex: 0, z: 4,
+            });
+        }
+
         let i = 0;
         for (const market of _activeMarkets) {
             const color = PALETTE[(i + 1) % PALETTE.length];
@@ -230,12 +462,15 @@
             i++;
         }
 
+        // Use combined day range if unrealized is loaded
+        const xDays = (_showUnrealized && _unrealizedDays.length) ? _unrealizedDays : _equityDays;
+
         _equityChart.setOption({
             tooltip: { ...tooltipBase(), formatter: fmtTooltip },
             legend: { data: series.map((s) => s.name), textStyle: { color: C.dim, fontSize: 10, fontFamily: MONO }, top: 5, type: "scroll",
                 icon: "roundRect", itemWidth: 14, itemHeight: 3 },
             grid: baseGrid({ top: 35 }),
-            xAxis: { type: "category", data: _equityDays, axisLabel: { color: C.dim, fontSize: 10, fontFamily: MONO }, axisLine: { lineStyle: { color: C.border } } },
+            xAxis: { type: "category", data: xDays, axisLabel: { color: C.dim, fontSize: 10, fontFamily: MONO }, axisLine: { lineStyle: { color: C.border } } },
             yAxis: [
                 { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v), fontFamily: MONO }, splitLine: { lineStyle: { color: C.border } } },
             ],
@@ -1255,6 +1490,23 @@
         });
         overlay.style.display = "flex";
     }
+    document.getElementById("btn-compute-unrealized").addEventListener("click", async () => {
+        const btn = document.getElementById("btn-compute-unrealized");
+        const prog = document.getElementById("unrealized-progress");
+        btn.disabled = true;
+        btn.textContent = "Computing...";
+        try {
+            await computeHistoricalUnrealized((msg) => {
+                if (msg) prog.textContent = msg;
+                else { prog.textContent = "Done ✓"; btn.textContent = "\u2699 Recompute"; btn.disabled = false; }
+            });
+        } catch (e) {
+            prog.textContent = "Error: " + e.message;
+            btn.textContent = "\u2699 Compute Unrealized History";
+            btn.disabled = false;
+        }
+    });
+
     document.getElementById("btn-settings").addEventListener("click", openSettings);
     document.getElementById("btn-settings-close").addEventListener("click", () => { overlay.style.display = "none"; });
     overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
