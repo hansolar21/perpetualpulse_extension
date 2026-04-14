@@ -422,6 +422,11 @@
 
             // Find the account container to inject metrics
             let container = cfg.getAccountContainer();
+            // Remove stale floating overlay if real container is found
+            if (container) {
+                const stale = document.getElementById("pp-hl-overlay");
+                if (stale) stale.remove();
+            }
             if (!container) {
                 // Hard fallback: use a fixed overlay anchored above the positions table
                 const existingOverlay = document.getElementById("pp-hl-overlay");
