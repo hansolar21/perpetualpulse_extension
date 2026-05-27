@@ -247,9 +247,19 @@
     </section>
 
     <section class="chart-section" id="section-trades">
-        <h2>All Trades
-            <button id="btn-dl-csv" style="font-size:10px;padding:2px 10px;margin-left:10px;background:#1a2035;border:1px solid #448aff44;color:#448aff;border-radius:3px;cursor:pointer;">&#8595; Download CSV</button>
-        </h2>
+        <h2>All Trades</h2>
+        <div id="trades-export-bar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px 12px;background:#0f1318;border:1px solid #2a2d35;border-radius:4px;">
+            <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em;">Export CSV:</span>
+            <input id="export-markets" placeholder="Tickers (ETH,BTC,SOL or blank=all)" style="width:220px;font-size:11px;" />
+            <input id="export-date-from" type="date" title="From" style="font-size:11px;" />
+            <input id="export-date-to" type="date" title="To" style="font-size:11px;" />
+            <select id="export-type" style="font-size:11px;">
+                <option value="">All types</option>
+                <option>trade</option><option>liquidation</option><option>deleverage</option>
+            </select>
+            <button id="btn-dl-csv" style="font-size:11px;padding:3px 12px;background:#1a2035;border:1px solid #448aff66;color:#448aff;border-radius:3px;cursor:pointer;">&#8595; Download CSV</button>
+            <span id="export-status" style="font-size:11px;color:#666;"></span>
+        </div>
         <div id="trades-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
             <input id="tf-market" placeholder="Market (e.g. ETH)" style="width:130px;" />
             <select id="tf-side">

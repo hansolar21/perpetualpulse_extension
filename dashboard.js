@@ -1745,25 +1745,51 @@
     // Also trigger filter on Enter key in market input
     document.getElementById("tf-market").addEventListener("keydown", e => { if (e.key === "Enter") loadTradesTable(); });
 
-    // CSV Download
+    // CSV Download — uses export bar inputs (independent of table filters)
     document.getElementById("btn-dl-csv").addEventListener("click", () => {
         const btn = document.getElementById("btn-dl-csv");
-        btn.textContent = "Preparing...";
+        const status = document.getElementById("export-status");
+        btn.textContent = "Building...";
         btn.disabled = true;
+        status.textContent = "";
         try {
+            const marketsRaw = document.getElementById("export-markets").value.trim();
+            const exportFrom = document.getElementById("export-date-from").value;
+            const exportTo = document.getElementById("export-date-to").value;
+            const exportType = document.getElementById("export-type").value;
+
+            const parts = [];
+            if (marketsRaw) {
+                const tickers = marketsRaw.split(",").map(m => m.trim().toUpperCase()).filter(Boolean);
+                const inList = tickers.map(t => `'${t.replace(/'/g,"''")}'`).join(",");
+                parts.push(`UPPER(market) IN (${inList})`);
+            }
+            if (exportFrom) parts.push(`date >= '${exportFrom}'`);
+            if (exportTo) parts.push(`date <= '${exportTo} 23:59:59'`);
+            if (exportType) parts.push(`type = '${exportType}'`);
+            const where = parts.length ? "WHERE " + parts.join(" AND ") : "";
+
+            const countRow = query(`SELECT COUNT(*) as n FROM trades ${where}`)[0];
+            const total = countRow ? countRow.n : 0;
+            status.textContent = `Exporting ${total.toLocaleString()} rows...`;
+
             const rows = query(`SELECT date, market, side, type, size, price, trade_value, closed_pnl, fee, role
-                FROM trades ${_tradesWhere} ORDER BY date ASC`);
+                FROM trades ${where} ORDER BY date ASC`);
             const headers = ["date","market","side","type","size","price","trade_value_usd","closed_pnl","fee","role"];
-            const escape = v => v == null ? "" : String(v).includes(",") || String(v).includes("\"") ? `"${String(v).replace(/"/g,'""')}"` : String(v);
+            const escape = v => { if (v == null) return ""; const s = String(v); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g,'""')}"` : s; };
             const csv = [headers.join(","),
                 ...rows.map(r => [r.date,r.market,r.side,r.type,r.size,r.price,r.trade_value,r.closed_pnl,r.fee,r.role].map(escape).join(","))
             ].join("\n");
+
+            const markets = marketsRaw ? marketsRaw.replace(/[^A-Za-z0-9_,]/g,"").slice(0,30) : "all";
             const blob = new Blob([csv], { type: "text/csv" });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
-            a.href = url; a.download = `trades_${new Date().toISOString().slice(0,10)}.csv`;
+            a.href = url;
+            a.download = `trades_${markets}_${new Date().toISOString().slice(0,10)}.csv`;
             a.click(); URL.revokeObjectURL(url);
-        } catch(e) { console.error(e); }
+            status.textContent = `\u2713 ${total.toLocaleString()} rows downloaded`;
+        } catch(e) { console.error(e); status.textContent = "Error — check console"; }
         btn.textContent = "\u2193 Download CSV"; btn.disabled = false;
     });
 
