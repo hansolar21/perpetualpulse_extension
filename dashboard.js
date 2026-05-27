@@ -1511,6 +1511,7 @@
             if (!_db) { document.getElementById("status-text").textContent = "No trade data. Open app.lighter.xyz first to sync."; return; }
             renderSummary();
             renderEquityCurve();
+            loadTradesTable();
             await renderExposure();
             await renderTransfers();
             renderDailyPnL();
@@ -1673,6 +1674,97 @@
                 setTimeout(() => location.reload(), 1000);
             });
         });
+    });
+
+    // ===== TRADES TABLE =====
+    const PAGE_SIZE = 100;
+    let _tradesPage = 0;
+    let _tradesWhere = "";
+    let _tradesTotal = 0;
+
+    function buildTradesWhere() {
+        const parts = [];
+        const market = document.getElementById("tf-market").value.trim();
+        const side = document.getElementById("tf-side").value;
+        const type = document.getElementById("tf-type").value;
+        const from = document.getElementById("tf-date-from").value;
+        const to = document.getElementById("tf-date-to").value;
+        if (market) parts.push(`market LIKE '%${market.replace(/'/g,"''")}%'`);
+        if (side) parts.push(`side = '${side.replace(/'/g,"''")}' OR side LIKE '%${side.replace(/'/g,"''")}%'`);
+        if (type) parts.push(`type = '${type}'`);
+        if (from) parts.push(`date >= '${from}'`);
+        if (to) parts.push(`date <= '${to} 23:59:59'`);
+        return parts.length ? "WHERE " + parts.join(" AND ") : "";
+    }
+
+    function renderTradesPage() {
+        const where = _tradesWhere;
+        const offset = _tradesPage * PAGE_SIZE;
+        const rows = query(`SELECT date, market, side, type, size, price, trade_value, closed_pnl, fee, role
+            FROM trades ${where} ORDER BY date DESC LIMIT ${PAGE_SIZE} OFFSET ${offset}`);
+        const tbody = document.getElementById("trades-tbody");
+        const fmtN = (v, d=4) => v == null ? "—" : Number(v).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:d});
+        const pnlColor = (v) => v > 0 ? C.green : v < 0 ? C.red : "";
+        tbody.innerHTML = rows.map(r => `<tr>
+            <td style="white-space:nowrap;color:#888">${(r.date||"").slice(0,19)}</td>
+            <td style="font-weight:600">${r.market||""}</td>
+            <td style="color:#aaa;font-size:10px">${r.side||""}</td>
+            <td style="color:#666;font-size:10px">${r.type||""}</td>
+            <td style="text-align:right">${fmtN(r.size)}</td>
+            <td style="text-align:right">${fmtN(r.price,2)}</td>
+            <td style="text-align:right">${fmtN(r.trade_value,2)}</td>
+            <td style="text-align:right;color:${pnlColor(r.closed_pnl)}">${r.closed_pnl != null ? fmtN(r.closed_pnl,2) : "—"}</td>
+            <td style="text-align:right;color:#888">${fmtN(r.fee,4)}</td>
+            <td style="color:#666;font-size:10px">${r.role||""}</td>
+        </tr>`).join("");
+        const totalPages = Math.ceil(_tradesTotal / PAGE_SIZE);
+        document.getElementById("trades-page-info").textContent =
+            `Page ${_tradesPage + 1} of ${totalPages} (${_tradesTotal.toLocaleString()} trades)`;
+        document.getElementById("btn-trades-prev").disabled = _tradesPage === 0;
+        document.getElementById("btn-trades-next").disabled = _tradesPage >= totalPages - 1;
+    }
+
+    function loadTradesTable() {
+        _tradesWhere = buildTradesWhere();
+        _tradesPage = 0;
+        const countRow = query(`SELECT COUNT(*) as n FROM trades ${_tradesWhere}`)[0];
+        _tradesTotal = countRow ? countRow.n : 0;
+        document.getElementById("trades-count").textContent = `${_tradesTotal.toLocaleString()} rows`;
+        renderTradesPage();
+    }
+
+    document.getElementById("btn-trades-filter").addEventListener("click", loadTradesTable);
+    document.getElementById("btn-trades-reset").addEventListener("click", () => {
+        ["tf-market","tf-date-from","tf-date-to"].forEach(id => document.getElementById(id).value = "");
+        ["tf-side","tf-type"].forEach(id => document.getElementById(id).selectedIndex = 0);
+        loadTradesTable();
+    });
+    document.getElementById("btn-trades-prev").addEventListener("click", () => { if (_tradesPage > 0) { _tradesPage--; renderTradesPage(); } });
+    document.getElementById("btn-trades-next").addEventListener("click", () => { _tradesPage++; renderTradesPage(); });
+
+    // Also trigger filter on Enter key in market input
+    document.getElementById("tf-market").addEventListener("keydown", e => { if (e.key === "Enter") loadTradesTable(); });
+
+    // CSV Download
+    document.getElementById("btn-dl-csv").addEventListener("click", () => {
+        const btn = document.getElementById("btn-dl-csv");
+        btn.textContent = "Preparing...";
+        btn.disabled = true;
+        try {
+            const rows = query(`SELECT date, market, side, type, size, price, trade_value, closed_pnl, fee, role
+                FROM trades ${_tradesWhere} ORDER BY date ASC`);
+            const headers = ["date","market","side","type","size","price","trade_value_usd","closed_pnl","fee","role"];
+            const escape = v => v == null ? "" : String(v).includes(",") || String(v).includes("\"") ? `"${String(v).replace(/"/g,'""')}"` : String(v);
+            const csv = [headers.join(","),
+                ...rows.map(r => [r.date,r.market,r.side,r.type,r.size,r.price,r.trade_value,r.closed_pnl,r.fee,r.role].map(escape).join(","))
+            ].join("\n");
+            const blob = new Blob([csv], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = `trades_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click(); URL.revokeObjectURL(url);
+        } catch(e) { console.error(e); }
+        btn.textContent = "\u2193 Download CSV"; btn.disabled = false;
     });
 
     init();

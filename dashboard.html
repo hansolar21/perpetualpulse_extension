@@ -246,6 +246,50 @@
         <div class="echart" id="chart-funding"></div>
     </section>
 
+    <section class="chart-section" id="section-trades">
+        <h2>All Trades
+            <button id="btn-dl-csv" style="font-size:10px;padding:2px 10px;margin-left:10px;background:#1a2035;border:1px solid #448aff44;color:#448aff;border-radius:3px;cursor:pointer;">&#8595; Download CSV</button>
+        </h2>
+        <div id="trades-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+            <input id="tf-market" placeholder="Market (e.g. ETH)" style="width:130px;" />
+            <select id="tf-side">
+                <option value="">All sides</option>
+                <option>Long</option><option>Short</option>
+                <option>Open Long</option><option>Close Long</option>
+                <option>Open Short</option><option>Close Short</option>
+                <option>Short &gt; Long</option><option>Long &gt; Short</option>
+            </select>
+            <select id="tf-type">
+                <option value="">All types</option>
+                <option>trade</option><option>liquidation</option><option>deleverage</option>
+            </select>
+            <input id="tf-date-from" type="date" title="From date" />
+            <input id="tf-date-to" type="date" title="To date" />
+            <button id="btn-trades-filter" class="btn btn-sm">Filter</button>
+            <button id="btn-trades-reset" class="btn btn-sm">Reset</button>
+            <span id="trades-count" style="font-size:11px;color:#666;margin-left:4px;"></span>
+        </div>
+        <div class="table-wrap" style="overflow-x:auto;">
+            <table id="table-trades" style="width:100%;font-size:11px;">
+                <thead><tr>
+                    <th>Date</th><th>Market</th><th>Side</th><th>Type</th>
+                    <th style="text-align:right">Size</th>
+                    <th style="text-align:right">Price</th>
+                    <th style="text-align:right">Value (USD)</th>
+                    <th style="text-align:right">Closed PnL</th>
+                    <th style="text-align:right">Fee</th>
+                    <th>Role</th>
+                </tr></thead>
+                <tbody id="trades-tbody"></tbody>
+            </table>
+        </div>
+        <div id="trades-pagination" style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:12px;">
+            <button id="btn-trades-prev" class="btn btn-sm">&laquo; Prev</button>
+            <span id="trades-page-info"></span>
+            <button id="btn-trades-next" class="btn btn-sm">Next &raquo;</button>
+        </div>
+    </section>
+
     <script src="lib/echarts.min.js"></script>
     <script src="lib/sql-wasm.js"></script>
     <script src="dashboard.js"></script>
