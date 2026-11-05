@@ -6,7 +6,7 @@
   "permissions": ["storage", "unlimitedStorage", "tabs"],
   "action": {},
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://mainnet.zklighter.elliot.ai https://api.hyperliquid.xyz https://api.binance.com https://fapi.binance.com; base-uri 'self'; form-action 'none'"
   },
   "background": {
     "service_worker": "background.js"
@@ -14,6 +14,8 @@
   "host_permissions": [
     "https://app.lighter.xyz/*",
     "https://mainnet.zklighter.elliot.ai/*",
+    "https://robinhoodchain.lighter.xyz/*",
+    "https://api.rh.lighter.xyz/*",
     "https://app.hyperliquid.xyz/*",
     "https://api.hyperliquid.xyz/*",
     "https://api.binance.com/*",
@@ -21,19 +23,19 @@
   ],
   "content_scripts": [
     {
-      "matches": ["https://app.lighter.xyz/*"],
+      "matches": ["https://app.lighter.xyz/*", "https://robinhoodchain.lighter.xyz/*"],
       "js": [
         "platform.js",
         "lib/sql-wasm.js",
         "trade-history.js",
         "content.js",
         "hotkeys.js",
-        "volatility.js"
+        "market-columns.js"
       ],
       "run_at": "document_start"
     },
     {
-      "matches": ["https://app.lighter.xyz/*"],
+      "matches": ["https://app.lighter.xyz/*", "https://robinhoodchain.lighter.xyz/*"],
       "js": ["page-bridge.js"],
       "run_at": "document_start",
       "world": "MAIN"

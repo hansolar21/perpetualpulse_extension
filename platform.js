@@ -16,6 +16,18 @@
         return null;
     }
 
+    // Each Lighter site has its own backend, with its own markets and accounts.
+    const LIGHTER_MAINNET = {
+        isMainnet: true,
+        api: "https://mainnet.zklighter.elliot.ai/api/v1",
+        stream: "wss://mainnet.zklighter.elliot.ai/stream",
+    };
+    const LIGHTER_ROBINHOOD = {
+        isMainnet: false,
+        api: "https://api.rh.lighter.xyz/api/v1",
+        stream: "wss://api.rh.lighter.xyz/stream",
+    };
+
     // Platform-specific selectors and behaviors
     const platformConfig = {
         [PLATFORMS.LIGHTER]: {
@@ -259,6 +271,7 @@
 
     // Export
     window._PP_PLATFORMS = PLATFORMS;
+    window._PP_lighterBackend = location.hostname === "robinhoodchain.lighter.xyz" ? LIGHTER_ROBINHOOD : LIGHTER_MAINNET;
     window._PP_detectPlatform = detectPlatform;
     window._PP_platformConfig = platformConfig;
     window._PP_currentPlatform = detectPlatform();

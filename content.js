@@ -139,7 +139,7 @@ async function fetchSymbolToMarketId() {
     if (Object.keys(_symbolToMarketId).length > 0) return _symbolToMarketId;
     try {
         // Use the funding-rates API which has symbol + market_id
-        const resp = await fetch("https://mainnet.zklighter.elliot.ai/api/v1/funding-rates");
+        const resp = await fetch(`${_PP_lighterBackend.api}/funding-rates`);
         const data = await resp.json();
         const rates = data.funding_rates || [];
         for (const r of rates) {
@@ -205,6 +205,28 @@ let _fundingLastFetch = 0;
 const FUNDING_CACHE_MS = 30_000; // REST fallback refresh every 30s
 let _fundingWs = null;
 let _fundingWsRetries = 0;
+let _marketStats = {}; // UPPERCASE symbol -> { marketId, bid, ask, mid, change24h, fundingRate, fundingTs } (read by market-columns.js)
+let _marketStatsUpdatedAt = 0;
+
+function storeMarketStats(update) {
+    _marketStatsUpdatedAt = Date.now();
+    for (const data of Object.values(update || {})) {
+        if (!data.symbol) continue;
+        const stats = { marketId: data.market_id };
+        if (data.best_bid_price !== undefined) stats.bid = data.best_bid_price;
+        if (data.best_ask_price !== undefined) stats.ask = data.best_ask_price;
+        if (data.mid_price !== undefined) stats.mid = data.mid_price; // what Lighter shows as Last Price
+        if (data.daily_price_change !== undefined) stats.change24h = data.daily_price_change; // and 24h
+        if (data.funding_rate !== undefined) stats.fundingRate = data.funding_rate;
+        if (data.funding_timestamp !== undefined) stats.fundingTs = data.funding_timestamp;
+        // The selector shows rhQQQ/USDC as QQQ/USDC and 1000NOT as kNOT
+        const displayName = data.symbol.replace(/^rh/, "").replace(/^1000/, "k");
+        for (const symbol of [data.symbol, displayName]) {
+            const key = symbol.toUpperCase();
+            _marketStats[key] = { ..._marketStats[key], ...stats };
+        }
+    }
+}
 const FUNDING_WS_MAX_RETRIES = 10;
 
 // market_id -> symbol reverse map (built from _symbolToMarketId)
@@ -220,13 +242,14 @@ function connectFundingWebSocket() {
     if (_fundingWs && (_fundingWs.readyState === WebSocket.OPEN || _fundingWs.readyState === WebSocket.CONNECTING)) return;
 
     try {
-        _fundingWs = new WebSocket("wss://mainnet.zklighter.elliot.ai/stream?encoding=json&readonly=true");
+        _fundingWs = new WebSocket(`${_PP_lighterBackend.stream}?encoding=json&readonly=true`);
 
         _fundingWs.onopen = () => {
             console.log("[Perpetualpulse] Funding WS connected");
             _fundingWsRetries = 0;
             // Subscribe to market stats (includes current_funding_rate)
             _fundingWs.send(JSON.stringify({ type: "subscribe", channel: "market_stats/all", flush_interval: "5000" }));
+            _fundingWs.send(JSON.stringify({ type: "subscribe", channel: "spot_market_stats/all" }));
         };
 
         _fundingWs.onmessage = (event) => {
@@ -239,11 +262,15 @@ function connectFundingWebSocket() {
                 // Handle both subscribed/market_stats and update/market_stats
                 if (msg.type === "subscribed/market_stats" || msg.type === "update/market_stats") {
                     const stats = msg.market_stats || {};
+                    storeMarketStats(stats);
                     for (const [marketId, data] of Object.entries(stats)) {
                         if (data.current_funding_rate !== undefined) {
                             _wsFundingRates[marketId] = Number(data.current_funding_rate);
                         }
                     }
+                }
+                if (msg.type === "subscribed/spot_market_stats" || msg.type === "update/spot_market_stats") {
+                    storeMarketStats(msg.spot_market_stats);
                 }
             } catch (e) {
                 // ignore parse errors
@@ -277,7 +304,7 @@ async function fetchFundingRates() {
         return _fundingRates;
     }
     try {
-        const resp = await fetch("https://mainnet.zklighter.elliot.ai/api/v1/funding-rates");
+        const resp = await fetch(`${_PP_lighterBackend.api}/funding-rates`);
         const data = await resp.json();
         const rates = data.funding_rates || data.fundingRates || [];
         const newRates = {};
@@ -746,11 +773,13 @@ async function injectMetrics() {
         }
     });
 
-    // Store unrealized PnL to chrome.storage for the dashboard
-    chrome.storage.local.get("pp_unrealized_pnl", (existing) => {
-        const prev = existing.pp_unrealized_pnl || {};
-        chrome.storage.local.set({ pp_unrealized_pnl: { ...prev, lighter: unrealizedSum, ts: Date.now() } });
-    });
+    // Store unrealized PnL to chrome.storage for the dashboard, which covers mainnet only
+    if (_PP_lighterBackend.isMainnet) {
+        chrome.storage.local.get("pp_unrealized_pnl", (existing) => {
+            const prev = existing.pp_unrealized_pnl || {};
+            chrome.storage.local.set({ pp_unrealized_pnl: { ...prev, lighter: unrealizedSum, ts: Date.now() } });
+        });
+    }
 
     const portVal = safePortfolioValue();
 

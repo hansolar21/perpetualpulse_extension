@@ -88,7 +88,7 @@
         for (const p of params) {
             const v = Array.isArray(p.value) ? p.value[1] : p.value;
             const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
-            s += `<br/>${dot}${p.seriesName}: <b>${fmt(v)}</b>`;
+            s += `<br/>${dot}${esc(p.seriesName)}: <b>${fmt(v)}</b>`;
         }
         return s;
     }
@@ -111,6 +111,11 @@
             if (!result.length) return [];
             return result[0].values.map((row) => { const obj = {}; result[0].columns.forEach((col, i) => (obj[col] = row[i])); return obj; });
         } catch (e) { console.error("Query:", sql, e); return []; }
+    }
+
+    // Escape values from the trade DB and APIs before they reach innerHTML or chart tooltips
+    function esc(v) {
+        return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     }
 
     function fmt(n, d = 2) {
@@ -461,7 +466,7 @@
         _marketDailyPnl = {};
         for (const m of markets) {
             const md = query(`SELECT DATE(date) as day, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net
-                FROM trades WHERE market='${m.market}' GROUP BY day ORDER BY day`);
+                FROM trades WHERE market='${String(m.market).replace(/'/g, "''")}' GROUP BY day ORDER BY day`);
             const mfMap = marketFunding[m.market] || {};
             let mcum = 0;
             const dayMap = {};
@@ -574,7 +579,7 @@
             el.className = "market-item";
             el.dataset.market = m.market;
             const pnlColor = m.net_pnl >= 0 ? C.green : C.red;
-            el.innerHTML = `<span>${m.market}</span><span class="pnl" style="color:${pnlColor}">${fmt(m.net_pnl)}</span>`;
+            el.innerHTML = `<span>${esc(m.market)}</span><span class="pnl" style="color:${pnlColor}">${fmt(m.net_pnl)}</span>`;
             el.addEventListener("click", () => {
                 if (_activeMarkets.has(m.market)) { _activeMarkets.delete(m.market); el.classList.remove("active"); }
                 else { _activeMarkets.add(m.market); el.classList.add("active"); }
@@ -785,7 +790,7 @@
                 for (const p of params) {
                     const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>`;
                     const val = p.seriesName === "Leverage" ? p.value + "x" : fmt(p.value);
-                    s += `<br/>${dot}${p.seriesName}: <b>${val}</b>`;
+                    s += `<br/>${dot}${esc(p.seriesName)}: <b>${val}</b>`;
                 }
                 return s;
             }},
@@ -909,7 +914,7 @@
         const data = query(`SELECT market, SUM(COALESCE(closed_pnl,0)) - SUM(fee) as net_pnl
             FROM trades GROUP BY market ORDER BY net_pnl DESC`);
         makeChart("chart-market-pnl").setOption({
-            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p) => `${p[0].name}: <b>${fmt(p[0].value)}</b>` },
+            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p) => `${esc(p[0].name)}: <b>${fmt(p[0].value)}</b>` },
             grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
             xAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
             yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
@@ -920,7 +925,7 @@
     function renderMarketVolume() {
         const data = query(`SELECT market, SUM(trade_value) as volume FROM trades GROUP BY market ORDER BY volume DESC LIMIT 15`);
         makeChart("chart-market-vol").setOption({
-            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p) => `${p[0].name}: <b>${fmt(p[0].value)}</b>` },
+            tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" }, formatter: (p) => `${esc(p[0].name)}: <b>${fmt(p[0].value)}</b>` },
             grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
             xAxis: { type: "value", axisLabel: { color: C.dim, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: C.border } } },
             yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
@@ -966,7 +971,7 @@
                     `<div style="width:${realW}%;height:10px;background:${realColor};border-radius:1px" title="Realized ${fmt(r.realized)}"></div>` +
                     `<div style="width:${fundW}%;height:10px;background:${fundColor};opacity:0.6;border-radius:1px" title="Funding ${fmt(r.funding)}"></div>` +
                     `</div>`;
-                tr.innerHTML = `<td>${r.market}</td>` +
+                tr.innerHTML = `<td>${esc(r.market)}</td>` +
                     `<td class="${pnlClass(r.realized)}">${fmt(r.realized)}</td>` +
                     `<td class="${pnlClass(-r.fees)}">${fmt(r.fees)}</td>` +
                     `<td class="${pnlClass(r.funding)}">${fmt(r.funding)}</td>` +
@@ -1007,7 +1012,7 @@
         const data = query(`SELECT role, COUNT(*) as cnt, SUM(trade_value) as volume FROM trades WHERE role IS NOT NULL GROUP BY role`);
         makeChart("chart-maker-taker").setOption({
             tooltip: { trigger: "item", backgroundColor: C.bg3, borderColor: C.border, textStyle: { color: C.text },
-                formatter: (p) => `${p.name}<br/>Volume: <b>${fmt(p.value)}</b><br/>Fills: ${data[p.dataIndex].cnt.toLocaleString()}` },
+                formatter: (p) => `${esc(p.name)}<br/>Volume: <b>${fmt(p.value)}</b><br/>Fills: ${data[p.dataIndex].cnt.toLocaleString()}` },
             series: [{ type: "pie", radius: ["40%", "70%"], center: ["50%", "50%"],
                 data: data.map((r, i) => ({ name: r.role, value: r.volume, itemStyle: { color: [C.blue, C.amber, C.purple][i] } })),
                 label: { color: C.text, formatter: "{b}\n{d}%" },
@@ -1021,7 +1026,7 @@
             FROM trades WHERE closed_pnl IS NOT NULL AND closed_pnl!=0 GROUP BY market HAVING total>=10 ORDER BY win_rate DESC`);
         makeChart("chart-winrate").setOption({
             tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" },
-                formatter: (p) => { const r = data[data.length - 1 - p[0].dataIndex]; return `${r.market}: <b>${r.win_rate}%</b> (${r.wins}/${r.total})`; } },
+                formatter: (p) => { const r = data[data.length - 1 - p[0].dataIndex]; return `${esc(r.market)}: <b>${r.win_rate}%</b> (${r.wins}/${r.total})`; } },
             grid: { top: 10, right: 30, bottom: 10, left: 80, containLabel: true },
             xAxis: { type: "value", min: 0, max: 100, axisLabel: { color: C.dim, formatter: "{value}%" }, splitLine: { lineStyle: { color: C.border } } },
             yAxis: { type: "category", data: data.map((r) => r.market).reverse(), axisLabel: { color: C.text, fontSize: 11 }, axisLine: { show: false } },
@@ -1038,7 +1043,7 @@
             const tbody = document.querySelector(`#${id} tbody`); tbody.innerHTML = "";
             for (const r of rows) {
                 const tr = document.createElement("tr");
-                tr.innerHTML = `<td>${r.market}</td><td>${r.side}</td><td>${(r.date || "").slice(0, 10)}</td><td>${fmt(r.trade_value)}</td><td class="${pnlClass(r.closed_pnl)}">${fmt(r.closed_pnl)}</td>`;
+                tr.innerHTML = `<td>${esc(r.market)}</td><td>${esc(r.side)}</td><td>${esc((r.date || "").slice(0, 10))}</td><td>${fmt(r.trade_value)}</td><td class="${pnlClass(r.closed_pnl)}">${fmt(r.closed_pnl)}</td>`;
                 tbody.appendChild(tr);
             }
         };
@@ -1057,7 +1062,7 @@
             const funding = fmap[r.month] || 0, net = r.pnl - r.fees + funding;
             const makerPct = r.total > 0 ? ((r.maker / r.total) * 100).toFixed(1) + "%" : "—";
             const tr = document.createElement("tr");
-            tr.innerHTML = `<td>${r.month}</td><td>${r.trades.toLocaleString()}</td><td>${fmt(r.volume)}</td><td class="${pnlClass(r.pnl)}">${fmt(r.pnl)}</td><td>${fmt(r.fees)}</td><td class="${pnlClass(funding)}">${fmt(funding)}</td><td class="${pnlClass(net)}">${fmt(net)}</td><td>${makerPct}</td>`;
+            tr.innerHTML = `<td>${esc(r.month)}</td><td>${r.trades.toLocaleString()}</td><td>${fmt(r.volume)}</td><td class="${pnlClass(r.pnl)}">${fmt(r.pnl)}</td><td>${fmt(r.fees)}</td><td class="${pnlClass(funding)}">${fmt(funding)}</td><td class="${pnlClass(net)}">${fmt(net)}</td><td>${makerPct}</td>`;
             tbody.appendChild(tr);
         }
     }
@@ -1095,7 +1100,7 @@
                 formatter: (p) => {
                     if (p.seriesType === "scatter") return `Trade: <b>${fmt(p.value[1])}</b>`;
                     const d = p.value;
-                    return `${p.name}<br/>Max: ${fmt(d[5])}<br/>Q3: ${fmt(d[4])}<br/>Median: ${fmt(d[3])}<br/>Q1: ${fmt(d[2])}<br/>Min: ${fmt(d[1])}<br/>Net: <b>${fmt(hourSums[p.dataIndex])}</b>`;
+                    return `${esc(p.name)}<br/>Max: ${fmt(d[5])}<br/>Q3: ${fmt(d[4])}<br/>Median: ${fmt(d[3])}<br/>Q1: ${fmt(d[2])}<br/>Min: ${fmt(d[1])}<br/>Net: <b>${fmt(hourSums[p.dataIndex])}</b>`;
                 } },
             grid: baseGrid({ bottom: 50 }),
             xAxis: { type: "category", data: hourLabels, axisLabel: { color: C.dim, fontSize: 9, rotate: 45 }, axisLine: { lineStyle: { color: C.border } } },
@@ -1446,7 +1451,7 @@
         const top20 = marketStats.slice(0, 20);
         makeChart("chart-duration-market").setOption({
             tooltip: { ...tooltipBase(), trigger: "axis", axisPointer: { type: "shadow" },
-                formatter: (p) => { const m = top20.find(x => x.market === p[0].name); return m ? `<b>${m.market}</b><br/>Avg: ${fmtDuration(m.avgDur)}<br/>Med: ${fmtDuration(m.medDur)}<br/>Positions: ${m.trades}` : ""; }
+                formatter: (p) => { const m = top20.find(x => x.market === p[0].name); return m ? `<b>${esc(m.market)}</b><br/>Avg: ${fmtDuration(m.avgDur)}<br/>Med: ${fmtDuration(m.medDur)}<br/>Positions: ${m.trades}` : ""; }
             },
             grid: { top: 10, right: 20, bottom: 10, left: 80, containLabel: true },
             xAxis: { type: "value", name: "Hours", axisLabel: { color: C.dim, formatter: (v) => v.toFixed(0) + "h" }, splitLine: { lineStyle: { color: C.border } } },
@@ -1470,7 +1475,7 @@
                 const wr = (m.winRate * 100).toFixed(1) + "%";
                 const lw = m.longWin !== null ? (m.longWin * 100).toFixed(1) + "%" : "—";
                 const sw = m.shortWin !== null ? (m.shortWin * 100).toFixed(1) + "%" : "—";
-                tr.innerHTML = `<td>${m.market}</td><td>${m.trades}</td><td>${fmtDuration(m.avgDur)}</td><td>${fmtDuration(m.medDur)}</td>` +
+                tr.innerHTML = `<td>${esc(m.market)}</td><td>${m.trades}</td><td>${fmtDuration(m.avgDur)}</td><td>${fmtDuration(m.medDur)}</td>` +
                     `<td class="${m.winRate >= 0.5 ? 'positive' : 'negative'}">${wr}</td>` +
                     `<td class="${pnlClass(m.avgPnl)}">${fmt(m.avgPnl)}</td>` +
                     `<td class="${m.shortWin !== null && m.shortWin >= 0.5 ? 'positive' : 'negative'}">${sw}</td>` +
@@ -1592,40 +1597,10 @@
     });
 
     // --- Deposits & Withdrawals separate sync ---
-    const ACCOUNT_INDEX = 24;
     // Asset IDs from GET /api/v1/assetDetails (verified 2026-04-08)
     const ASSET_NAMES = { 1: "ETH", 2: "LIT", 3: "USDC", 5: "LINK", 6: "UNI", 7: "AAVE", 8: "SKY", 9: "LDO", 10: "AZTEC" };
     const USDC_ASSET_ID = 3;
     const assetName = (id) => ASSET_NAMES[id] || (id != null ? `asset_${id}` : "USDC");
-
-    function parseTransfers(raw) {
-        const out = [];
-        for (const t of raw) {
-            const date = t.timestamp ? new Date(t.timestamp).toISOString() : "";
-            if (!date) continue;
-            const amount = parseFloat(t.amount || 0);
-            if (!amount) continue;
-
-            // Skip internal same-account perps↔spot moves
-            if (t.type === "L2SelfTransfer" && t.from_account_index === t.to_account_index) continue;
-
-            let type, signedAmount;
-            switch (t.type) {
-                case "L2TransferInflow":  type = "Deposit";       signedAmount = +amount; break;
-                case "L2TransferOutflow": type = "Withdrawal";    signedAmount = -amount; break;
-                case "L2StakeAssetInflow":  type = "StakeIn";     signedAmount = +amount; break;
-                case "L2StakeAssetOutflow": type = "StakeOut";    signedAmount = -amount; break;
-                case "L2FundingRebate":
-                case "FundingRebate":     type = "FundingRebate"; signedAmount = +amount; break;
-                default:
-                    type = t.type || "Unknown";
-                    signedAmount = t.to_account_index === ACCOUNT_INDEX ? +amount : -amount;
-            }
-
-            out.push({ date, type, amount: signedAmount, asset_id: t.asset_id ?? null, asset: assetName(t.asset_id) });
-        }
-        return out;
-    }
 
     function parseDepWd(deposits, withdrawals) {
         const out = [];
@@ -1706,16 +1681,16 @@
         const fmtN = (v, d=4) => v == null ? "—" : Number(v).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:d});
         const pnlColor = (v) => v > 0 ? C.green : v < 0 ? C.red : "";
         tbody.innerHTML = rows.map(r => `<tr>
-            <td style="white-space:nowrap;color:#888">${(r.date||"").slice(0,19)}</td>
-            <td style="font-weight:600">${r.market||""}</td>
-            <td style="color:#aaa;font-size:10px">${r.side||""}</td>
-            <td style="color:#666;font-size:10px">${r.type||""}</td>
+            <td style="white-space:nowrap;color:#888">${esc((r.date||"").slice(0,19))}</td>
+            <td style="font-weight:600">${esc(r.market)}</td>
+            <td style="color:#aaa;font-size:10px">${esc(r.side)}</td>
+            <td style="color:#666;font-size:10px">${esc(r.type)}</td>
             <td style="text-align:right">${fmtN(r.size)}</td>
             <td style="text-align:right">${fmtN(r.price,2)}</td>
             <td style="text-align:right">${fmtN(r.trade_value,2)}</td>
             <td style="text-align:right;color:${pnlColor(r.closed_pnl)}">${r.closed_pnl != null ? fmtN(r.closed_pnl,2) : "—"}</td>
             <td style="text-align:right;color:#888">${fmtN(r.fee,4)}</td>
-            <td style="color:#666;font-size:10px">${r.role||""}</td>
+            <td style="color:#666;font-size:10px">${esc(r.role)}</td>
         </tr>`).join("");
         const totalPages = Math.ceil(_tradesTotal / PAGE_SIZE);
         document.getElementById("trades-page-info").textContent =
