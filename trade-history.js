@@ -5,8 +5,9 @@
 (function () {
     "use strict";
 
-    // Only run on Lighter
-    if (!location.hostname.includes("lighter.xyz")) return;
+    // Mainnet only: the dashboard has a single trade database, and account numbers
+    // and markets on other Lighter sites would be mixed into it.
+    if (location.hostname !== "app.lighter.xyz") return;
 
     console.log("[Perpetualpulse] Trade history module loading");
 
@@ -28,28 +29,32 @@
             const handler = (e) => {
                 if (e.data?.type === "pp-auth-response" && e.data.id === id) {
                     window.removeEventListener("message", handler);
-                    resolve({ token: e.data.token, accountIndex: e.data.accountIndex });
+                    resolve({ hasToken: !!e.data.hasToken, accountIndex: e.data.accountIndex });
                 }
             };
             window.addEventListener("message", handler);
             window.postMessage({ type: "pp-get-auth", id });
-            setTimeout(() => { window.removeEventListener("message", handler); resolve({ token: null, accountIndex: null }); }, 2000);
+            setTimeout(() => { window.removeEventListener("message", handler); resolve({ hasToken: false, accountIndex: null }); }, 2000);
         });
     }
 
-    // Generate fresh auth token via Lighter's WASM (stronger than captured token)
-    function generateFreshAuth(accountIndex) {
-        return new Promise((resolve) => {
-            const id = "pp-gen-" + Math.random().toString(36).slice(2);
+    // Authenticated API call, made by page-bridge.js so the token stays in the MAIN world
+    function bridgeApi(api, request, timeoutMs) {
+        return new Promise((resolve, reject) => {
+            const id = "pp-api-" + Math.random().toString(36).slice(2);
+            const timer = setTimeout(() => {
+                window.removeEventListener("message", handler);
+                reject(new Error(`${api} request timed out`));
+            }, timeoutMs);
             const handler = (e) => {
-                if (e.data?.type === "pp-generate-auth-result" && e.data.id === id) {
-                    window.removeEventListener("message", handler);
-                    resolve(e.data.token);
-                }
+                if (e.data?.type !== "pp-api-response" || e.data.id !== id) return;
+                clearTimeout(timer);
+                window.removeEventListener("message", handler);
+                if (e.data.ok) resolve(e.data.result);
+                else reject(new Error(e.data.error || `${api} request failed`));
             };
             window.addEventListener("message", handler);
-            window.postMessage({ type: "pp-generate-auth", id, accountIndex });
-            setTimeout(() => { window.removeEventListener("message", handler); resolve(null); }, 5000);
+            window.postMessage({ type: "pp-api-request", id, api, request });
         });
     }
 
@@ -230,23 +235,11 @@
     }
 
     // ---------- Data Fetch ----------
-    async function fetchExportCSV(authToken, accountIndex, type, startMs, endMs, { maxRetries = 4 } = {}) {
-        let params = `account_index=${accountIndex}&type=${type}&start_timestamp=${startMs}&end_timestamp=${endMs}`;
-        if (type === "trade") params += "&side=all&role=all&trade_type=all";
-
-        const url = `${EXPORT_API}?${params}`;
-        const resp = await fetch(url, {
-            headers: {
-                Authorization: authToken,
-                PreferAuthServer: "true",
-                Origin: "https://app.lighter.xyz",
-            },
-        });
-
-        const data = await resp.json();
+    async function fetchExportCSV(accountIndex, type, startMs, endMs, { maxRetries = 4 } = {}) {
+        const data = await bridgeApi("export", { accountIndex, exportType: type, startMs, endMs }, 30000);
         if (data.code === 22504 || data.code === 20001) return null; // no data / invalid range
-        if (data.code !== 200 || !data.data_url) {
-            console.warn("[Perpetualpulse] Export API error:", data);
+        if (data.code !== 200 || !data.dataUrl) {
+            console.warn("[Perpetualpulse] Export API error:", data.code, data.message);
             return null;
         }
 
@@ -259,7 +252,7 @@
                 console.log(`[Perpetualpulse] S3 retry ${attempt}/${S3_RETRIES - 1} after ${S3_DELAYS[attempt]}ms...`);
                 await new Promise((r) => setTimeout(r, S3_DELAYS[attempt]));
             }
-            csvResp = await fetch(data.data_url);
+            csvResp = await fetch(data.dataUrl);
             if (csvResp.ok) break;
             if (csvResp.status !== 404) {
                 console.warn(`[Perpetualpulse] S3 fetch failed: ${csvResp.status}`);
@@ -380,46 +373,54 @@
     }
 
     // Fetch transfer history via background service worker (no CORS restrictions)
-    async function fetchTransferHistory(authToken, accountIndex) {
+    function fetchRawTransfersFromBackground(accountIndex) {
         return new Promise((resolve) => {
-            chrome.runtime.sendMessage(
-                { type: "pp-fetch-transfers", accountIndex, authToken },
-                (resp) => {
-                    if (chrome.runtime.lastError) {
-                        console.warn("[Perpetualpulse] BG transfer fetch error:", chrome.runtime.lastError.message);
-                        resolve([]);
-                        return;
-                    }
-                    const raw = resp?.transfers || [];
-                    console.log(`[Perpetualpulse] Got ${raw.length} raw transfers from background`);
-
-                    const transfers = [];
-                    for (const t of raw) {
-                        const date = t.timestamp ? new Date(t.timestamp).toISOString()
-                            : t.created_at ? new Date(t.created_at).toISOString() : "";
-                        if (!date) continue;
-                        const amount = parseFloat(t.amount || t.collateral || 0);
-                        if (!amount) continue;
-                        if (t.type === "L2SelfTransfer" && t.from_account_index === t.to_account_index) continue;
-
-                        let type, signedAmount;
-                        switch (t.type) {
-                            case "L2TransferInflow":    type = "Deposit";       signedAmount = +amount; break;
-                            case "L2TransferOutflow":   type = "Withdrawal";    signedAmount = -amount; break;
-                            case "L2StakeAssetInflow":  type = "StakeIn";       signedAmount = +amount; break;
-                            case "L2StakeAssetOutflow": type = "StakeOut";      signedAmount = -amount; break;
-                            case "L2FundingRebate":
-                            case "FundingRebate":       type = "FundingRebate"; signedAmount = +amount; break;
-                            default:
-                                type = t.type || "Unknown";
-                                signedAmount = t.to_account_index === accountIndex ? +amount : -amount;
-                        }
-                        if (signedAmount) transfers.push({ date, type, amount: signedAmount, asset_id: t.asset_id ?? null });
-                    }
-                    resolve(transfers);
+            chrome.runtime.sendMessage({ type: "pp-fetch-transfers", accountIndex }, (resp) => {
+                if (chrome.runtime.lastError) {
+                    console.warn("[Perpetualpulse] BG transfer fetch error:", chrome.runtime.lastError.message);
+                    resolve([]);
+                    return;
                 }
-            );
+                resolve(resp?.transfers || []);
+            });
         });
+    }
+
+    // Uses the page session first, then the read-only token saved in dashboard settings
+    async function fetchTransferHistory(accountIndex) {
+        let raw;
+        try {
+            raw = (await bridgeApi("transfers", { accountIndex }, 120000)).transfers;
+        } catch (e) {
+            console.log(`[Perpetualpulse] Transfer fetch via page failed (${e.message}), trying saved token`);
+            raw = await fetchRawTransfersFromBackground(accountIndex);
+        }
+        console.log(`[Perpetualpulse] Got ${raw.length} raw transfers`);
+
+        const transfers = [];
+        for (const t of raw) {
+            const date = t.timestamp ? new Date(t.timestamp).toISOString()
+                : t.created_at ? new Date(t.created_at).toISOString() : "";
+            if (!date) continue;
+            const amount = parseFloat(t.amount || t.collateral || 0);
+            if (!amount) continue;
+            if (t.type === "L2SelfTransfer" && t.from_account_index === t.to_account_index) continue;
+
+            let type, signedAmount;
+            switch (t.type) {
+                case "L2TransferInflow":    type = "Deposit";       signedAmount = +amount; break;
+                case "L2TransferOutflow":   type = "Withdrawal";    signedAmount = -amount; break;
+                case "L2StakeAssetInflow":  type = "StakeIn";       signedAmount = +amount; break;
+                case "L2StakeAssetOutflow": type = "StakeOut";      signedAmount = -amount; break;
+                case "L2FundingRebate":
+                case "FundingRebate":       type = "FundingRebate"; signedAmount = +amount; break;
+                default:
+                    type = t.type || "Unknown";
+                    signedAmount = t.to_account_index === accountIndex ? +amount : -amount;
+            }
+            if (signedAmount) transfers.push({ date, type, amount: signedAmount, asset_id: t.asset_id ?? null });
+        }
+        return transfers;
     }
 
     // ---------- FIFO PnL Reconstruction ----------
@@ -598,18 +599,17 @@
 
         try {
             // Retry auth up to 6 times (30s total) — page needs time to make API calls
-            let auth = { token: null, accountIndex: null };
+            let auth = { hasToken: false, accountIndex: null };
             for (let attempt = 0; attempt < 6; attempt++) {
                 auth = await getAuth();
-                if (auth.token) break;
+                if (auth.hasToken) break;
                 console.log(`[Perpetualpulse] Waiting for auth token (attempt ${attempt + 1}/6)...`);
                 await new Promise((r) => setTimeout(r, 5000));
             }
-            if (!auth.token) {
+            if (!auth.hasToken) {
                 console.log("[Perpetualpulse] Not logged in, skipping trade sync");
                 return;
             }
-            const authToken = auth.token;
 
             // Determine account index
             let accountIndex = auth.accountIndex || await loadMeta("account_index");
@@ -650,7 +650,7 @@
             for (const [qStart, qEnd] of quarters) {
                 console.log(`[Perpetualpulse] Fetching trades ${new Date(qStart).toISOString().slice(0, 10)} → ${new Date(qEnd).toISOString().slice(0, 10)}`);
 
-                const data = await fetchExportCSV(authToken, accountIndex, "trade", qStart, qEnd);
+                const data = await fetchExportCSV(accountIndex, "trade", qStart, qEnd);
                 if (data) {
                     const added = insertTrades(data.rows);
                     totalAdded += added;
@@ -665,7 +665,7 @@
             const fundingMonths = getMonthlyRanges(new Date(startMs), new Date(endMs));
             for (const [mStart, mEnd] of fundingMonths) {
                 try {
-                    const data = await fetchExportCSV(authToken, accountIndex, "funding", mStart, mEnd, { maxRetries: 1 });
+                    const data = await fetchExportCSV(accountIndex, "funding", mStart, mEnd, { maxRetries: 1 });
                     if (data) {
                         const added = insertFunding(data.rows);
                         if (added > 0) console.log(`[Perpetualpulse] +${added} funding entries`);
@@ -676,10 +676,9 @@
                 await new Promise((r) => setTimeout(r, 300));
             }
 
-            // Sync transfers — generate a fresh token via WASM for best auth
+            // Sync transfers
             try {
-                const freshToken = await generateFreshAuth(accountIndex) || authToken;
-                const transfers = await fetchTransferHistory(freshToken, accountIndex);
+                const transfers = await fetchTransferHistory(accountIndex);
                 if (transfers.length > 0) {
                     const added = insertTransferObjects(transfers);
                     console.log(`[Perpetualpulse] +${added} new transfers (${transfers.length} total fetched)`);
@@ -719,7 +718,8 @@
         }
     }
 
-    // ---------- Query API (exposed to other scripts) ----------
+    // ---------- Query API (content-script world only; not reachable from page scripts) ----------
+    // For debugging, pick this extension's context in the DevTools console dropdown.
     window._PP_TradeDB = {
         // Run a raw SQL query
         query: async (sql, params = []) => {
@@ -827,25 +827,6 @@
         },
     };
 
-    // ---------- Message bridge for MAIN world console API ----------
-    // Content scripts and MAIN world share postMessage but NOT window properties.
-    // page-bridge.js (MAIN) exposes window._PP_TradeDB that proxies calls here.
-    const _tradeDBApi = window._PP_TradeDB; // ref in this isolated world
-    window.addEventListener("message", async (e) => {
-        if (e.source !== window || e.data?.type !== "pp-tradedb-call") return;
-        const { id, method, args = [] } = e.data;
-        if (!_tradeDBApi || typeof _tradeDBApi[method] !== "function") {
-            window.postMessage({ type: "pp-tradedb-result", id, result: `unknown method: ${method}` });
-            return;
-        }
-        try {
-            const result = await _tradeDBApi[method](...args);
-            window.postMessage({ type: "pp-tradedb-result", id, result });
-        } catch (err) {
-            window.postMessage({ type: "pp-tradedb-result", id, result: `error: ${err.message}` });
-        }
-    });
-
     // ---------- Force Transfer Sync (from background message) ----------
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (msg.type !== "pp-force-sync-transfers") return false;
@@ -853,10 +834,12 @@
             try {
                 await initSQL();
                 const auth = await getAuth();
-                const accountIndex = auth.accountIndex || msg.accountIndex || 24;
-                const freshToken = await generateFreshAuth(accountIndex) || auth.token;
-                console.log("[Perpetualpulse] Force transfer sync, token:", freshToken ? "ok" : "none");
-                const transfers = await fetchTransferHistory(freshToken, accountIndex);
+                const accountIndex = auth.accountIndex || msg.accountIndex;
+                if (!accountIndex) {
+                    sendResponse({ ok: false, error: "Could not detect account" });
+                    return;
+                }
+                const transfers = await fetchTransferHistory(accountIndex);
                 let added = 0;
                 if (transfers.length > 0) {
                     added = insertTransferObjects(transfers);

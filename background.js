@@ -3,7 +3,11 @@
 // --- Fetch transfer history (background has no CORS restrictions) ---
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type !== "pp-fetch-transfers") return false;
-    const { accountIndex, authToken } = msg;
+    const accountIndex = parseInt(msg.accountIndex);
+    if (!(accountIndex > 0)) {
+        sendResponse({ transfers: [] });
+        return false;
+    }
 
     (async () => {
         const BASE = "https://mainnet.zklighter.elliot.ai/api/v1/transfer/history";
@@ -11,11 +15,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         let cursor = undefined;
         let pages = 0;
 
-        // Load stored auth token from settings as extra fallback
+        // Page-session auth is handled by page-bridge.js; this is the saved-token fallback
         const stored = await new Promise(r => chrome.storage.local.get(["pp_settings"], d => r((d.pp_settings || {}).auth_token || null)));
 
-        // Try auth strategies: provided token, stored token, no auth
-        const tokens = [authToken, stored].filter(Boolean);
+        const tokens = [stored].filter(Boolean);
         const authHeaders = [
             ...tokens.map(t => ({ Authorization: t, PreferAuthServer: "true" })),
             ...tokens.map(t => ({ Authorization: t })),
@@ -62,9 +65,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // --- Sync deposits/withdrawals from correct on-chain endpoints ---
-const L1_ADDRESS = "0x9b8D146AB4b61C281B993E3F85066249A6e9b0Db";
-const ACCOUNT_INDEX = 24;
 const BASE_URL = "https://mainnet.zklighter.elliot.ai/api/v1";
+
+// Both token formats carry the account index second (ro:account:... and deadline:account:...)
+function accountIndexFromToken(token) {
+    const idx = parseInt(String(token).split(":")[1]);
+    return idx > 0 ? idx : null;
+}
+
+async function fetchL1Address(accountIndex) {
+    const resp = await fetch(`${BASE_URL}/account?by=index&value=${accountIndex}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.accounts?.[0]?.l1_address || null;
+}
 
 async function fetchAllPages(url, token, itemKey) {
     const all = [];
@@ -100,11 +114,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
+            const accountIndex = accountIndexFromToken(token);
+            if (!accountIndex) {
+                sendResponse({ ok: false, error: "Could not read the account from your API token. Check it in ⚙ Settings." });
+                return;
+            }
+            const l1Address = await fetchL1Address(accountIndex);
+            if (!l1Address) {
+                sendResponse({ ok: false, error: `Could not look up the wallet for account ${accountIndex}` });
+                return;
+            }
+
             // Fetch deposits (requires l1_address) and withdrawals in parallel
             // NOTE: withdraw response key is "withdraws" (not "withdrawals") per Lighter API spec
             const [depResult, wdResult] = await Promise.all([
-                fetchAllPages(`${BASE_URL}/deposit/history?account_index=${ACCOUNT_INDEX}&l1_address=${L1_ADDRESS}`, token, "deposits"),
-                fetchAllPages(`${BASE_URL}/withdraw/history?account_index=${ACCOUNT_INDEX}`, token, "withdraws"),
+                fetchAllPages(`${BASE_URL}/deposit/history?account_index=${accountIndex}&l1_address=${encodeURIComponent(l1Address)}`, token, "deposits"),
+                fetchAllPages(`${BASE_URL}/withdraw/history?account_index=${accountIndex}`, token, "withdraws"),
             ]);
 
             if (depResult.error && wdResult.error) {
